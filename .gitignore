@@ -1,0 +1,12 @@
+# Environment files with secrets
+.env
+.env.local
+.env.production
+
+# Private keys and certificates
+*.key
+*.pem
+*.crt
+
+# Local testing
+test/
