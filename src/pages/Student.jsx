@@ -2,7 +2,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import { Stage, Layer, Line } from 'react-konva';
 import * as Ably from 'ably';
-import './Whiteboard.css';
+import './StudentNew.css';
 
 function Student() {
   const [searchParams] = useSearchParams();
@@ -22,7 +22,7 @@ function Student() {
   const [color, setColor] = useState('black');
   const [brushSize, setBrushSize] = useState(3);
   const [isDrawing, setIsDrawing] = useState(false);
-  const [inputMode, setInputMode] = useState('all'); // 'all' or 'stylus-only'
+  const [inputMode, setInputMode] = useState('stylus-only'); // 'all' or 'stylus-only'
 
   // Undo/redo stacks
   const undoStack = useRef([]);
@@ -170,7 +170,7 @@ function Student() {
       const previousLength = studentLines.length;
 
       // Check if pointer is near any line and remove it
-      const eraserRadius = 10;
+      const eraserRadius = 20; // Increased for smoother erasing
       const linesToKeep = studentLines.filter((line) => {
         // Check if any point in the line is within eraser radius
         for (let i = 0; i < line.points.length; i += 2) {
@@ -238,198 +238,162 @@ function Student() {
     }
   };
 
+  const getShortClientId = () => {
+    return clientId.split('-')[1]?.substring(0, 3) || 'kw';
+  };
+
   return (
-    <div className="whiteboard">
-      <header className="header">
-        <div className="header-left">
-          <Link to="/" className="back-link">← Back</Link>
-          <h1>Student View</h1>
-          <span className="room-badge">Room: {roomId}</span>
-        </div>
-        <div className="status">
-          <span className={`status-indicator ${isConnected ? 'connected' : 'disconnected'}`}></span>
-          <span>{isConnected ? 'Connected' : 'Disconnected'}</span>
-          <span className="client-id">{clientId}</span>
-        </div>
-      </header>
+    <div className="student-canvas-page">
+      {/* Header */}
+      <div className="student-header">
+        <h1 className="student-title">Student Canvas</h1>
+        <p className="student-subtitle">Connected as {getShortClientId()}</p>
+      </div>
 
-      <div className="toolbar">
-        <div className="tool-group">
-          <button
-            onClick={() => setTool('pen')}
-            className={`btn ${tool === 'pen' ? 'btn-active' : ''}`}
-          >
-            Pen
-          </button>
-          <button
-            onClick={() => setTool('eraser')}
-            className={`btn ${tool === 'eraser' ? 'btn-active' : ''}`}
-          >
-            Eraser
-          </button>
-          <button onClick={handleUndo} className="btn">Undo</button>
-          <button onClick={handleRedo} className="btn">Redo</button>
-          <button onClick={handleClear} className="btn btn-danger">Clear</button>
-        </div>
-
-        <div className="tool-group">
-          <span style={{ marginRight: '10px', color: '#666', fontSize: '14px' }}>Color:</span>
-          <button
-            onClick={() => setColor('#0066FF')}
-            className="color-btn"
-            style={{
-              background: '#0066FF',
-              width: '36px',
-              height: '36px',
-              borderRadius: '50%',
-              border: color === '#0066FF' ? '3px solid #333' : '2px solid #ddd',
-              cursor: 'pointer',
-              padding: 0
-            }}
-            title="Blue"
-          />
-          <button
-            onClick={() => setColor('black')}
-            className="color-btn"
-            style={{
-              background: 'black',
-              width: '36px',
-              height: '36px',
-              borderRadius: '50%',
-              border: color === 'black' ? '3px solid #333' : '2px solid #ddd',
-              cursor: 'pointer',
-              padding: 0
-            }}
-            title="Black"
-          />
-          <button
-            onClick={() => setColor('#00AA00')}
-            className="color-btn"
-            style={{
-              background: '#00AA00',
-              width: '36px',
-              height: '36px',
-              borderRadius: '50%',
-              border: color === '#00AA00' ? '3px solid #333' : '2px solid #ddd',
-              cursor: 'pointer',
-              padding: 0
-            }}
-            title="Green"
-          />
-          <button
-            onClick={() => setColor('#FF0000')}
-            className="color-btn"
-            style={{
-              background: '#FF0000',
-              width: '36px',
-              height: '36px',
-              borderRadius: '50%',
-              border: color === '#FF0000' ? '3px solid #333' : '2px solid #ddd',
-              cursor: 'pointer',
-              padding: 0
-            }}
-            title="Red"
-          />
-          <button
-            onClick={() => setColor('#FFD700')}
-            className="color-btn"
-            style={{
-              background: '#FFD700',
-              width: '36px',
-              height: '36px',
-              borderRadius: '50%',
-              border: color === '#FFD700' ? '3px solid #333' : '2px solid #ddd',
-              cursor: 'pointer',
-              padding: 0
-            }}
-            title="Yellow"
-          />
-        </div>
-
-        <div className="tool-group">
-          <span style={{ marginRight: '10px', color: '#666', fontSize: '14px' }}>Brush Size:</span>
-          <input
-            type="range"
-            min="1"
-            max="10"
-            value={brushSize}
-            onChange={(e) => setBrushSize(parseInt(e.target.value))}
-            style={{
-              width: '150px',
-              cursor: 'pointer'
-            }}
-          />
-          <span style={{ marginLeft: '10px', color: '#666', fontSize: '14px', minWidth: '30px' }}>
-            {brushSize}px
-          </span>
-        </div>
-
-        <div className="tool-group">
-          <span style={{ marginRight: '10px', color: '#666', fontSize: '14px' }}>Input Mode:</span>
-          <button
-            onClick={() => setInputMode('all')}
-            className={`btn ${inputMode === 'all' ? 'btn-active' : ''}`}
-          >
-            All Inputs
-          </button>
-          <button
-            onClick={() => setInputMode('stylus-only')}
-            className={`btn ${inputMode === 'stylus-only' ? 'btn-active' : ''}`}
-          >
-            Stylus Only
-          </button>
+      {/* Status Bar */}
+      <div className="student-status-bar">
+        <div className="status-badge">
+          <span className="status-dot"></span>
+          <span>Stylus mode (pen only)</span>
         </div>
       </div>
 
-      <div className="canvas-container">
-        <Stage
-          width={800}
-          height={600}
-          onPointerDown={handlePointerDown}
-          onPointerMove={handlePointerMove}
-          onPointerUp={handlePointerUp}
-          onPointerLeave={handlePointerUp}
-          style={{
-            border: '2px solid #ddd',
-            borderRadius: '8px',
-            background: 'white',
-            touchAction: 'none'
-          }}
-        >
-          {/* Student layer (editable) */}
-          <Layer>
-            {studentLines.map((line, i) => (
-              <Line
-                key={`student-${i}`}
-                points={line.points}
-                stroke={line.color}
-                strokeWidth={line.strokeWidth}
-                tension={0.5}
-                lineCap="round"
-                lineJoin="round"
+      <div className="student-canvas-container">
+        {/* Sidebar */}
+        <div className="student-sidebar">
+          {/* Colors */}
+          <div className="sidebar-section">
+            <h3 className="sidebar-label">COLORS</h3>
+            <div className="color-buttons">
+              <button
+                onClick={() => setColor('black')}
+                className={`color-button ${color === 'black' ? 'active' : ''}`}
+                style={{ background: 'black' }}
+                aria-label="Black"
               />
-            ))}
-          </Layer>
-
-          {/* Teacher layer (read-only overlay) */}
-          <Layer listening={false}>
-            {teacherLines.map((line, i) => (
-              <Line
-                key={`teacher-${i}`}
-                points={line.points}
-                stroke={line.color}
-                strokeWidth={line.strokeWidth}
-                tension={0.5}
-                lineCap="round"
-                lineJoin="round"
+              <button
+                onClick={() => setColor('#0066FF')}
+                className={`color-button ${color === '#0066FF' ? 'active' : ''}`}
+                style={{ background: '#0066FF' }}
+                aria-label="Blue"
               />
-            ))}
-          </Layer>
-        </Stage>
-      </div>
+              <button
+                onClick={() => setColor('#00AA00')}
+                className={`color-button ${color === '#00AA00' ? 'active' : ''}`}
+                style={{ background: '#00AA00' }}
+                aria-label="Green"
+              />
+            </div>
+          </div>
 
-      <div className="info-bar">
-        Draw with pen tool. Teacher annotations (red) will appear in real-time.
+          {/* Tools */}
+          <div className="sidebar-section">
+            <h3 className="sidebar-label">TOOLS</h3>
+            <div className="tool-buttons">
+              <button
+                onClick={() => setTool('pen')}
+                className={`tool-button ${tool === 'pen' ? 'active' : ''}`}
+              >
+                Pen
+              </button>
+              <button
+                onClick={() => setTool('eraser')}
+                className={`tool-button ${tool === 'eraser' ? 'active' : ''}`}
+              >
+                Eraser
+              </button>
+            </div>
+          </div>
+
+          {/* Brush Size */}
+          <div className="sidebar-section">
+            <h3 className="sidebar-label">BRUSH SIZE</h3>
+            <div className="brush-size-control">
+              <div className="brush-slider-container">
+                <input
+                  type="range"
+                  min="1"
+                  max="10"
+                  value={brushSize}
+                  onChange={(e) => setBrushSize(parseInt(e.target.value))}
+                  className="brush-slider"
+                />
+                <span className="brush-value">{brushSize}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* History */}
+          <div className="sidebar-section">
+            <h3 className="sidebar-label">HISTORY</h3>
+            <div className="history-buttons">
+              <button
+                onClick={handleUndo}
+                className="history-button"
+                disabled={undoStack.current.length === 0}
+              >
+                Undo
+              </button>
+              <button
+                onClick={handleRedo}
+                className="history-button"
+                disabled={redoStack.current.length === 0}
+              >
+                Redo
+              </button>
+              <button
+                onClick={handleClear}
+                className="history-button danger"
+              >
+                Clear
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Canvas */}
+        <div className="student-canvas-wrapper">
+          <Stage
+            width={1000}
+            height={700}
+            onPointerDown={handlePointerDown}
+            onPointerMove={handlePointerMove}
+            onPointerUp={handlePointerUp}
+            onPointerLeave={handlePointerUp}
+            className="canvas-stage"
+            style={{ touchAction: 'none' }}
+          >
+            {/* Student layer (editable) */}
+            <Layer>
+              {studentLines.map((line, i) => (
+                <Line
+                  key={`student-${i}`}
+                  points={line.points}
+                  stroke={line.color}
+                  strokeWidth={line.strokeWidth}
+                  tension={0.5}
+                  lineCap="round"
+                  lineJoin="round"
+                />
+              ))}
+            </Layer>
+
+            {/* Teacher layer (read-only overlay) */}
+            <Layer listening={false}>
+              {teacherLines.map((line, i) => (
+                <Line
+                  key={`teacher-${i}`}
+                  points={line.points}
+                  stroke={line.color}
+                  strokeWidth={line.strokeWidth}
+                  tension={0.5}
+                  lineCap="round"
+                  lineJoin="round"
+                />
+              ))}
+            </Layer>
+          </Stage>
+        </div>
       </div>
     </div>
   );

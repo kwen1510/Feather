@@ -116,7 +116,7 @@ const AnnotationModal = ({ student, isOpen, onClose, onAnnotate, existingAnnotat
       const previousLength = teacherAnnotations.length;
 
       // Check if pointer is near any line and remove it
-      const eraserRadius = 10;
+      const eraserRadius = 20; // Increased for smoother erasing
       const linesToKeep = teacherAnnotations.filter((line) => {
         // Check if any point in the line is within eraser radius
         for (let i = 0; i < line.points.length; i += 2) {

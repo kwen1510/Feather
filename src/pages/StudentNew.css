@@ -1,0 +1,277 @@
+/* Student Canvas - Modern Vertical Sidebar Design */
+
+.student-canvas-page {
+  min-height: 100vh;
+  background: linear-gradient(135deg, #d4f1e8 0%, #e8f5f1 100%);
+  padding: 2rem;
+  font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+.student-canvas-container {
+  display: flex;
+  gap: 1.5rem;
+  height: calc(100vh - 4rem);
+}
+
+/* Header */
+.student-header {
+  position: absolute;
+  top: 2rem;
+  left: 2rem;
+  z-index: 10;
+}
+
+.student-title {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #1a1a1a;
+  margin: 0 0 0.25rem 0;
+}
+
+.student-subtitle {
+  font-size: 0.875rem;
+  color: #666;
+  margin: 0;
+}
+
+/* Status badges (top right) */
+.student-status-bar {
+  position: absolute;
+  top: 2rem;
+  right: 2rem;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  z-index: 10;
+}
+
+.status-badge {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  background: white;
+  border-radius: 9999px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #10b981;
+}
+
+/* Sidebar */
+.student-sidebar {
+  width: 220px;
+  background: white;
+  border-radius: 1.5rem;
+  padding: 5rem 1.5rem 1.5rem;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+  flex-shrink: 0;
+}
+
+.sidebar-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.sidebar-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  color: #999;
+  text-transform: uppercase;
+  margin: 0;
+}
+
+/* Colors */
+.color-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.color-button {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  border: 3px solid transparent;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  padding: 0;
+}
+
+.color-button:hover {
+  transform: scale(1.05);
+}
+
+.color-button.active {
+  border-color: #374151;
+  box-shadow: 0 0 0 2px white, 0 0 0 4px #374151;
+}
+
+/* Tools */
+.tool-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.tool-button {
+  padding: 0.75rem 1rem;
+  border: none;
+  border-radius: 0.75rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  background: #f3f4f6;
+  color: #374151;
+}
+
+.tool-button:hover {
+  background: #e5e7eb;
+}
+
+.tool-button.active {
+  background: #10b981;
+  color: white;
+}
+
+/* Brush Size */
+.brush-size-control {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.brush-slider-container {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.brush-slider {
+  flex: 1;
+  height: 4px;
+  border-radius: 2px;
+  background: #e5e7eb;
+  outline: none;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.brush-slider::-webkit-slider-thumb {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #10b981;
+  cursor: pointer;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.brush-slider::-moz-range-thumb {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #10b981;
+  cursor: pointer;
+  border: none;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.brush-value {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #374151;
+  min-width: 1.5rem;
+}
+
+/* History */
+.history-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.history-button {
+  padding: 0.75rem 1rem;
+  border: none;
+  border-radius: 0.75rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  background: #f3f4f6;
+  color: #374151;
+}
+
+.history-button:hover:not(:disabled) {
+  background: #e5e7eb;
+}
+
+.history-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.history-button.danger {
+  background: #fee2e2;
+  color: #dc2626;
+}
+
+.history-button.danger:hover {
+  background: #fecaca;
+}
+
+/* Canvas */
+.student-canvas-wrapper {
+  flex: 1;
+  background: white;
+  border-radius: 1.5rem;
+  padding: 5rem 2rem 2rem;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.canvas-stage {
+  border: 2px solid #e5e7eb;
+  border-radius: 0.75rem;
+  background: white;
+}
+
+/* Responsive */
+@media (max-width: 1024px) {
+  .student-canvas-container {
+    flex-direction: column;
+  }
+
+  .student-sidebar {
+    width: 100%;
+    padding: 1.5rem;
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+
+  .sidebar-section {
+    flex: 1;
+    min-width: 200px;
+  }
+
+  .color-buttons {
+    flex-direction: row;
+  }
+}
