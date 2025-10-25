@@ -59,16 +59,15 @@ const AnnotationModal = ({ student, isOpen, onClose, onAnnotate, existingAnnotat
     });
 
     if (inputMode === 'stylus-only') {
-      // In stylus-only mode, only allow pointerType === 'pen' (stylus)
-      // For touch events, check if it's a single touch (likely stylus)
-      const isStylus = evt.pointerType === 'pen' ||
-                       (evt.type === 'touchstart' && evt.targetTouches?.length === 1);
+      // In stylus-only mode, ONLY allow pointerType === 'pen' (true stylus)
+      // Don't use touch events as fallback - they can be palm/finger touches
+      const isStylus = evt.pointerType === 'pen';
 
       if (!isStylus) {
-        console.log('Blocked: Not a stylus input');
+        console.log('Blocked: Not a stylus input (pointerType:', evt.pointerType, ')');
         return; // Ignore non-stylus input in stylus-only mode
       }
-      console.log('Allowed: Stylus detected');
+      console.log('Allowed: Stylus detected (pointerType: pen)');
     }
 
     if (tool === 'pen') {
