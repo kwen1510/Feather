@@ -19,6 +19,8 @@ function Teacher() {
 
   // Drawing state
   const [tool, setTool] = useState('pen');
+  const [color, setColor] = useState('#FF0000');
+  const [brushSize, setBrushSize] = useState(3);
   const [isDrawing, setIsDrawing] = useState(false);
 
   // Undo/redo stacks
@@ -103,8 +105,8 @@ function Teacher() {
       const newLine = {
         tool,
         points: [pos.x, pos.y],
-        color: 'red',
-        strokeWidth: 3,
+        color: color,
+        strokeWidth: brushSize,
       };
 
       // Save current state to undo stack
@@ -223,6 +225,102 @@ function Teacher() {
           <button onClick={handleUndo} className="btn">Undo</button>
           <button onClick={handleRedo} className="btn">Redo</button>
           <button onClick={handleClear} className="btn btn-danger">Clear</button>
+        </div>
+
+        <div className="tool-group">
+          <span style={{ marginRight: '10px', color: '#666', fontSize: '14px' }}>Color:</span>
+          <button
+            onClick={() => setColor('#FF0000')}
+            className="color-btn"
+            style={{
+              background: '#FF0000',
+              width: '36px',
+              height: '36px',
+              borderRadius: '50%',
+              border: color === '#FF0000' ? '3px solid #333' : '2px solid #ddd',
+              cursor: 'pointer',
+              padding: 0
+            }}
+            title="Red"
+          />
+          <button
+            onClick={() => setColor('#0066FF')}
+            className="color-btn"
+            style={{
+              background: '#0066FF',
+              width: '36px',
+              height: '36px',
+              borderRadius: '50%',
+              border: color === '#0066FF' ? '3px solid #333' : '2px solid #ddd',
+              cursor: 'pointer',
+              padding: 0
+            }}
+            title="Blue"
+          />
+          <button
+            onClick={() => setColor('black')}
+            className="color-btn"
+            style={{
+              background: 'black',
+              width: '36px',
+              height: '36px',
+              borderRadius: '50%',
+              border: color === 'black' ? '3px solid #333' : '2px solid #ddd',
+              cursor: 'pointer',
+              padding: 0
+            }}
+            title="Black"
+          />
+          <button
+            onClick={() => setColor('#00AA00')}
+            className="color-btn"
+            style={{
+              background: '#00AA00',
+              width: '36px',
+              height: '36px',
+              borderRadius: '50%',
+              border: color === '#00AA00' ? '3px solid #333' : '2px solid #ddd',
+              cursor: 'pointer',
+              padding: 0
+            }}
+            title="Green"
+          />
+          <button
+            onClick={() => setColor('#FFD700')}
+            className="color-btn"
+            style={{
+              background: '#FFD700',
+              width: '36px',
+              height: '36px',
+              borderRadius: '50%',
+              border: color === '#FFD700' ? '3px solid #333' : '2px solid #ddd',
+              cursor: 'pointer',
+              padding: 0
+            }}
+            title="Yellow"
+          />
+        </div>
+
+        <div className="tool-group">
+          <span style={{ marginRight: '10px', color: '#666', fontSize: '14px' }}>Brush Size:</span>
+          <button
+            onClick={() => setBrushSize(1)}
+            className={`btn ${brushSize === 1 ? 'btn-active' : ''}`}
+          >
+            Thin
+          </button>
+          <button
+            onClick={() => setBrushSize(3)}
+            className={`btn ${brushSize === 3 ? 'btn-active' : ''}`}
+          >
+            Medium
+          </button>
+          <button
+            onClick={() => setBrushSize(6)}
+            className={`btn ${brushSize === 6 ? 'btn-active' : ''}`}
+          >
+            Thick
+          </button>
         </div>
       </div>
 

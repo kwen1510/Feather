@@ -20,6 +20,7 @@ function Student() {
   // Drawing state
   const [tool, setTool] = useState('pen');
   const [color, setColor] = useState('black');
+  const [brushSize, setBrushSize] = useState(3);
   const [isDrawing, setIsDrawing] = useState(false);
   const [inputMode, setInputMode] = useState('all'); // 'all' or 'stylus-only'
 
@@ -125,7 +126,7 @@ function Student() {
         tool,
         points: [pos.x, pos.y],
         color: color,
-        strokeWidth: 3,
+        strokeWidth: brushSize,
       };
 
       // Save current state to undo stack
@@ -275,36 +276,95 @@ function Student() {
           <span style={{ marginRight: '10px', color: '#666', fontSize: '14px' }}>Color:</span>
           <button
             onClick={() => setColor('#0066FF')}
-            className={`btn ${color === '#0066FF' ? 'btn-active' : ''}`}
+            className="color-btn"
             style={{
-              background: color === '#0066FF' ? '#0066FF' : 'white',
-              color: color === '#0066FF' ? 'white' : '#0066FF',
-              border: '2px solid #0066FF'
+              background: '#0066FF',
+              width: '36px',
+              height: '36px',
+              borderRadius: '50%',
+              border: color === '#0066FF' ? '3px solid #333' : '2px solid #ddd',
+              cursor: 'pointer',
+              padding: 0
             }}
-          >
-            Blue
-          </button>
+            title="Blue"
+          />
           <button
             onClick={() => setColor('black')}
-            className={`btn ${color === 'black' ? 'btn-active' : ''}`}
+            className="color-btn"
             style={{
-              background: color === 'black' ? 'black' : 'white',
-              color: color === 'black' ? 'white' : 'black',
-              border: '2px solid black'
+              background: 'black',
+              width: '36px',
+              height: '36px',
+              borderRadius: '50%',
+              border: color === 'black' ? '3px solid #333' : '2px solid #ddd',
+              cursor: 'pointer',
+              padding: 0
             }}
-          >
-            Black
-          </button>
+            title="Black"
+          />
           <button
             onClick={() => setColor('#00AA00')}
-            className={`btn ${color === '#00AA00' ? 'btn-active' : ''}`}
+            className="color-btn"
             style={{
-              background: color === '#00AA00' ? '#00AA00' : 'white',
-              color: color === '#00AA00' ? 'white' : '#00AA00',
-              border: '2px solid #00AA00'
+              background: '#00AA00',
+              width: '36px',
+              height: '36px',
+              borderRadius: '50%',
+              border: color === '#00AA00' ? '3px solid #333' : '2px solid #ddd',
+              cursor: 'pointer',
+              padding: 0
             }}
+            title="Green"
+          />
+          <button
+            onClick={() => setColor('#FF0000')}
+            className="color-btn"
+            style={{
+              background: '#FF0000',
+              width: '36px',
+              height: '36px',
+              borderRadius: '50%',
+              border: color === '#FF0000' ? '3px solid #333' : '2px solid #ddd',
+              cursor: 'pointer',
+              padding: 0
+            }}
+            title="Red"
+          />
+          <button
+            onClick={() => setColor('#FFD700')}
+            className="color-btn"
+            style={{
+              background: '#FFD700',
+              width: '36px',
+              height: '36px',
+              borderRadius: '50%',
+              border: color === '#FFD700' ? '3px solid #333' : '2px solid #ddd',
+              cursor: 'pointer',
+              padding: 0
+            }}
+            title="Yellow"
+          />
+        </div>
+
+        <div className="tool-group">
+          <span style={{ marginRight: '10px', color: '#666', fontSize: '14px' }}>Brush Size:</span>
+          <button
+            onClick={() => setBrushSize(1)}
+            className={`btn ${brushSize === 1 ? 'btn-active' : ''}`}
           >
-            Green
+            Thin
+          </button>
+          <button
+            onClick={() => setBrushSize(3)}
+            className={`btn ${brushSize === 3 ? 'btn-active' : ''}`}
+          >
+            Medium
+          </button>
+          <button
+            onClick={() => setBrushSize(6)}
+            className={`btn ${brushSize === 6 ? 'btn-active' : ''}`}
+          >
+            Thick
           </button>
         </div>
 
