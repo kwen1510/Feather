@@ -17,6 +17,7 @@ const AnnotationModal = ({ student, isOpen, onClose, onAnnotate, existingAnnotat
   // Drawing state
   const [tool, setTool] = useState('pen');
   const [color, setColor] = useState('#FF0000');
+  const [brushSize, setBrushSize] = useState(3);
   const [isDrawing, setIsDrawing] = useState(false);
   const [teacherAnnotations, setTeacherAnnotations] = useState([]);
   const [inputMode, setInputMode] = useState('all'); // 'all' or 'stylus-only'
@@ -71,7 +72,7 @@ const AnnotationModal = ({ student, isOpen, onClose, onAnnotate, existingAnnotat
         tool: 'pen',
         points: [pos.x, pos.y],
         color: color,
-        strokeWidth: 3,
+        strokeWidth: brushSize,
       };
 
       // Save current state to undo stack
@@ -234,37 +235,106 @@ const AnnotationModal = ({ student, isOpen, onClose, onAnnotate, existingAnnotat
             <span style={{ marginRight: '10px', color: '#666', fontSize: '14px' }}>Color:</span>
             <button
               onClick={() => setColor('#FF0000')}
-              className={`btn ${color === '#FF0000' ? 'btn-active' : ''}`}
+              className="color-btn"
               style={{
-                background: color === '#FF0000' ? '#FF0000' : 'white',
-                color: color === '#FF0000' ? 'white' : '#FF0000',
-                border: '2px solid #FF0000'
+                background: '#FF0000',
+                width: '36px',
+                height: '36px',
+                borderRadius: '50%',
+                border: color === '#FF0000' ? '3px solid #333' : '2px solid #ddd',
+                cursor: 'pointer',
+                padding: 0
               }}
-            >
-              Red
-            </button>
+              title="Red"
+            />
+            <button
+              onClick={() => setColor('#0066FF')}
+              className="color-btn"
+              style={{
+                background: '#0066FF',
+                width: '36px',
+                height: '36px',
+                borderRadius: '50%',
+                border: color === '#0066FF' ? '3px solid #333' : '2px solid #ddd',
+                cursor: 'pointer',
+                padding: 0
+              }}
+              title="Blue"
+            />
+            <button
+              onClick={() => setColor('black')}
+              className="color-btn"
+              style={{
+                background: 'black',
+                width: '36px',
+                height: '36px',
+                borderRadius: '50%',
+                border: color === 'black' ? '3px solid #333' : '2px solid #ddd',
+                cursor: 'pointer',
+                padding: 0
+              }}
+              title="Black"
+            />
+            <button
+              onClick={() => setColor('#00AA00')}
+              className="color-btn"
+              style={{
+                background: '#00AA00',
+                width: '36px',
+                height: '36px',
+                borderRadius: '50%',
+                border: color === '#00AA00' ? '3px solid #333' : '2px solid #ddd',
+                cursor: 'pointer',
+                padding: 0
+              }}
+              title="Green"
+            />
+            <button
+              onClick={() => setColor('#FFD700')}
+              className="color-btn"
+              style={{
+                background: '#FFD700',
+                width: '36px',
+                height: '36px',
+                borderRadius: '50%',
+                border: color === '#FFD700' ? '3px solid #333' : '2px solid #ddd',
+                cursor: 'pointer',
+                padding: 0
+              }}
+              title="Yellow"
+            />
             <button
               onClick={() => setColor('#9933FF')}
-              className={`btn ${color === '#9933FF' ? 'btn-active' : ''}`}
+              className="color-btn"
               style={{
-                background: color === '#9933FF' ? '#9933FF' : 'white',
-                color: color === '#9933FF' ? 'white' : '#9933FF',
-                border: '2px solid #9933FF'
+                background: '#9933FF',
+                width: '36px',
+                height: '36px',
+                borderRadius: '50%',
+                border: color === '#9933FF' ? '3px solid #333' : '2px solid #ddd',
+                cursor: 'pointer',
+                padding: 0
               }}
-            >
-              Purple
-            </button>
-            <button
-              onClick={() => setColor('#00CED1')}
-              className={`btn ${color === '#00CED1' ? 'btn-active' : ''}`}
+              title="Purple"
+            />
+          </div>
+
+          <div className="tool-group">
+            <span style={{ marginRight: '10px', color: '#666', fontSize: '14px' }}>Brush Size:</span>
+            <input
+              type="range"
+              min="1"
+              max="10"
+              value={brushSize}
+              onChange={(e) => setBrushSize(parseInt(e.target.value))}
               style={{
-                background: color === '#00CED1' ? '#00CED1' : 'white',
-                color: color === '#00CED1' ? 'white' : '#00CED1',
-                border: '2px solid #00CED1'
+                width: '150px',
+                cursor: 'pointer'
               }}
-            >
-              Teal
-            </button>
+            />
+            <span style={{ marginLeft: '10px', color: '#666', fontSize: '14px', minWidth: '30px' }}>
+              {brushSize}px
+            </span>
           </div>
 
           <div className="tool-group">

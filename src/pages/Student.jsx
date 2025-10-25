@@ -348,24 +348,20 @@ function Student() {
 
         <div className="tool-group">
           <span style={{ marginRight: '10px', color: '#666', fontSize: '14px' }}>Brush Size:</span>
-          <button
-            onClick={() => setBrushSize(1)}
-            className={`btn ${brushSize === 1 ? 'btn-active' : ''}`}
-          >
-            Thin
-          </button>
-          <button
-            onClick={() => setBrushSize(3)}
-            className={`btn ${brushSize === 3 ? 'btn-active' : ''}`}
-          >
-            Medium
-          </button>
-          <button
-            onClick={() => setBrushSize(6)}
-            className={`btn ${brushSize === 6 ? 'btn-active' : ''}`}
-          >
-            Thick
-          </button>
+          <input
+            type="range"
+            min="1"
+            max="10"
+            value={brushSize}
+            onChange={(e) => setBrushSize(parseInt(e.target.value))}
+            style={{
+              width: '150px',
+              cursor: 'pointer'
+            }}
+          />
+          <span style={{ marginLeft: '10px', color: '#666', fontSize: '14px', minWidth: '30px' }}>
+            {brushSize}px
+          </span>
         </div>
 
         <div className="tool-group">
