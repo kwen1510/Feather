@@ -23,6 +23,7 @@ function Student() {
   const [brushSize, setBrushSize] = useState(3);
   const [isDrawing, setIsDrawing] = useState(false);
   const [inputMode, setInputMode] = useState('stylus-only'); // 'all' or 'stylus-only'
+  const [toolbarPosition, setToolbarPosition] = useState('left'); // 'left' or 'right'
 
   // Undo/redo stacks
   const undoStack = useRef([]);
@@ -242,25 +243,42 @@ function Student() {
     return clientId.split('-')[1]?.substring(0, 3) || 'kw';
   };
 
+  const toggleInputMode = () => {
+    setInputMode(prev => prev === 'stylus-only' ? 'all' : 'stylus-only');
+  };
+
+  const toggleToolbarPosition = () => {
+    setToolbarPosition(prev => prev === 'left' ? 'right' : 'left');
+  };
+
   return (
     <div className="student-canvas-page">
-      {/* Header */}
-      <div className="student-header">
-        <h1 className="student-title">Student Canvas</h1>
-        <p className="student-subtitle">Connected as {getShortClientId()}</p>
-      </div>
-
       {/* Status Bar */}
       <div className="student-status-bar">
-        <div className="status-badge">
+        <button
+          className="status-badge"
+          onClick={toggleInputMode}
+        >
           <span className="status-dot"></span>
-          <span>Stylus mode (pen only)</span>
-        </div>
+          <span>{inputMode === 'stylus-only' ? 'Stylus mode (pen only)' : 'All inputs'}</span>
+        </button>
+        <button
+          className="move-toolbar-btn"
+          onClick={toggleToolbarPosition}
+        >
+          Move toolbar to {toolbarPosition === 'left' ? 'right' : 'left'}
+        </button>
       </div>
 
-      <div className="student-canvas-container">
+      <div className={`student-canvas-container ${toolbarPosition === 'right' ? 'toolbar-right' : ''}`}>
         {/* Sidebar */}
         <div className="student-sidebar">
+          {/* Header inside sidebar */}
+          <div className="sidebar-header">
+            <h1 className="student-title">Student Canvas</h1>
+            <p className="student-subtitle">Connected as {getShortClientId()}</p>
+          </div>
+
           {/* Colors */}
           <div className="sidebar-section">
             <h3 className="sidebar-label">COLORS</h3>
