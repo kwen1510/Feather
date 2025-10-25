@@ -3,64 +3,106 @@ import { useNavigate } from 'react-router-dom';
 import './Landing.css';
 
 function Landing() {
-  const [roomId, setRoomId] = useState('demo');
+  const [sessionCode, setSessionCode] = useState('');
   const navigate = useNavigate();
 
-  const handleSubmit = (e, role) => {
-    e.preventDefault();
-    if (roomId.trim()) {
-      navigate(`/${role}?room=${roomId}`);
+  const handleJoinRoom = () => {
+    if (sessionCode.trim()) {
+      navigate(`/student?room=${sessionCode.trim()}`);
+    }
+  };
+
+  const handleKeyPress = (e) => {
+    if (e.key === 'Enter') {
+      handleJoinRoom();
     }
   };
 
   return (
-    <div className="landing">
-      <div className="landing-card">
-        <h1>Real-time Collaborative Whiteboard</h1>
-        <p className="subtitle">Two-layer drawing system for classroom collaboration</p>
+    <div className="landing-page">
+      <div className="landing-container">
+        <div className="landing-badge">LIVE DRAWING SUITE</div>
 
-        <div className="features">
-          <div className="feature">
-            <h3>Student View</h3>
-            <p>Draw on your own layer with undo/redo functionality</p>
+        <h1 className="landing-title">
+          Teach visually.<br />
+          Collaborate instantly.
+        </h1>
+
+        <p className="landing-description">
+          Live Drawing streams pencil-perfect strokes between<br />
+          teacher and students, across devices. Instant sync, buttery<br />
+          smooth annotation tools, and delightful classroom-ready<br />
+          session login for iPad and stylus worldwide
+        </p>
+
+        <div className="workspace-cards">
+          <div className="workspace-card teacher-card" onClick={() => navigate('/teacher?room=demo')}>
+            <h3>Teacher dashboard</h3>
+            <p>
+              Deploy your lesson. Interactive<br />
+              whiteboards for students across<br />
+              iPad and Apple Pencil. 📚
+            </p>
+            <span className="card-link">Try class →</span>
           </div>
-          <div className="feature">
-            <h3>Teacher View</h3>
-            <p>See student drawings in real-time and add annotations on a separate layer</p>
+
+          <div className="workspace-card student-card" onClick={() => navigate('/student?room=demo')}>
+            <h3>Student workspace</h3>
+            <p>
+              Tap with a code to draw alongside<br />
+              the class, with pencil tools,<br />
+              blackboard, and layers. Try! 🎨
+            </p>
+            <span className="card-link">Try student →</span>
           </div>
         </div>
 
-        <form className="room-form">
-          <label htmlFor="room-id">Enter Room ID</label>
-          <input
-            id="room-id"
-            type="text"
-            value={roomId}
-            onChange={(e) => setRoomId(e.target.value)}
-            placeholder="Enter room name..."
-            autoFocus
-          />
+        <div className="features">
+          <div className="feature">
+            <h4>Palm rejection</h4>
+            <p>Stylus-only<br />drawing</p>
+          </div>
+          <div className="feature">
+            <h4>Feedback loops</h4>
+            <p>Sub-second<br />annotations</p>
+          </div>
+          <div className="feature">
+            <h4>Realtime sync</h4>
+            <p>Sub-second<br />latency</p>
+          </div>
+        </div>
 
-          <div className="button-group">
-            <button
-              type="submit"
-              className="btn btn-student"
-              onClick={(e) => handleSubmit(e, 'student')}
-            >
-              Join as Student
-            </button>
-            <button
-              type="submit"
-              className="btn btn-teacher"
-              onClick={(e) => handleSubmit(e, 'teacher')}
-            >
-              Join as Teacher
+        <div className="session-code-section">
+          <h3>SESSION CODE</h3>
+          <p className="session-subtitle">Tap to join instantly.</p>
+
+          <div className="code-input-container">
+            <input
+              type="text"
+              value={sessionCode}
+              onChange={(e) => setSessionCode(e.target.value)}
+              onKeyPress={handleKeyPress}
+              placeholder="Enter room code"
+              className="code-input"
+            />
+            <button onClick={handleJoinRoom} className="join-btn">
+              Join →
             </button>
           </div>
-        </form>
 
-        <div className="info">
-          <p>Open multiple windows to test real-time collaboration</p>
+          <p className="helper-text">
+            Session codes are generated automatically in the teacher view or<br />
+            can be toggled in URL (room=CODE)
+          </p>
+        </div>
+
+        <div className="how-it-works">
+          <h3>How it works</h3>
+          <ol>
+            <li>Teacher starts a session (or uses "room=CODE") and shares the QRcode</li>
+            <li>Students join - scan with iPencil, iPhones, or paste the link on browser</li>
+            <li>Undoable/clear are reliable and realtime—perfect synchronized across student areas classroom-to-home</li>
+          </ol>
         </div>
       </div>
     </div>
