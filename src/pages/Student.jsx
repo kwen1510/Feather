@@ -33,8 +33,9 @@ function Student() {
   useEffect(() => {
     const initAbly = async () => {
       try {
+        // Use relative URL so it works on all devices (laptop, phone, tablet)
         const ably = new Ably.Realtime({
-          authUrl: 'http://localhost:8080/api/token',
+          authUrl: '/api/token',
           authParams: { clientId },
         });
 
@@ -102,12 +103,26 @@ function Student() {
   const handlePointerDown = (e) => {
     // Check input mode - if stylus-only, only allow pen input
     const evt = e.evt;
+
+    // Debug logging
+    console.log('Input detected:', {
+      pointerType: evt.pointerType,
+      type: evt.type,
+      touchType: evt.targetTouches?.length,
+      inputMode: inputMode
+    });
+
     if (inputMode === 'stylus-only') {
       // In stylus-only mode, only allow pointerType === 'pen' (stylus)
-      // Block mouse (MouseEvent) and touch (TouchEvent without pen type)
-      if (!evt.pointerType || evt.pointerType !== 'pen') {
+      // For touch events, check if it's a single touch (likely stylus)
+      const isStylus = evt.pointerType === 'pen' ||
+                       (evt.type === 'touchstart' && evt.targetTouches?.length === 1);
+
+      if (!isStylus) {
+        console.log('Blocked: Not a stylus input');
         return; // Ignore non-stylus input in stylus-only mode
       }
+      console.log('Allowed: Stylus detected');
     }
 
     if (tool === 'pen') {
