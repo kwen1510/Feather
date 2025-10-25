@@ -46,12 +46,20 @@ const AnnotationModal = ({ student, isOpen, onClose, onAnnotate, existingAnnotat
     return match ? `Student ${match[1]}` : student.clientId;
   };
 
+  const isAllowedPointerEvent = (evt) => {
+    if (inputMode !== 'stylus-only') return true;
+    return evt?.pointerType === 'pen';
+  };
+
   const handlePointerDown = (e) => {
     const evt = e.evt;
 
     // Stylus-only mode: only accept pointerType === 'pen'
-    if (inputMode === 'stylus-only' && evt.pointerType !== 'pen') {
-      console.log('Blocked: Not a stylus (pointerType:', evt.pointerType, ')');
+    if (!isAllowedPointerEvent(evt)) {
+      console.log('Blocked: Not a stylus (pointerType:', evt?.pointerType, ')');
+      if (evt?.preventDefault) {
+        evt.preventDefault();
+      }
       return;
     }
 
@@ -84,6 +92,14 @@ const AnnotationModal = ({ student, isOpen, onClose, onAnnotate, existingAnnotat
 
   const handlePointerMove = (e) => {
     if (!isDrawing) return;
+
+    const evt = e.evt;
+    if (!isAllowedPointerEvent(evt)) {
+      if (evt?.preventDefault) {
+        evt.preventDefault();
+      }
+      return;
+    }
 
     const stage = e.target.getStage();
     const point = stage.getPointerPosition();
@@ -123,13 +139,19 @@ const AnnotationModal = ({ student, isOpen, onClose, onAnnotate, existingAnnotat
     }
 
     // Prevent default to avoid scrolling on touch devices
-    const evt = e.evt;
-    if (evt.preventDefault) {
+    if (evt?.preventDefault) {
       evt.preventDefault();
     }
   };
 
-  const handlePointerUp = () => {
+  const handlePointerUp = (e) => {
+    const evt = e?.evt;
+    if (!isAllowedPointerEvent(evt)) {
+      if (evt?.preventDefault) {
+        evt.preventDefault();
+      }
+      return;
+    }
     setIsDrawing(false);
     // Publish after drawing/erasing is complete
     onAnnotate(teacherAnnotations);
@@ -230,13 +252,10 @@ const AnnotationModal = ({ student, isOpen, onClose, onAnnotate, existingAnnotat
             ref={stageRef}
             width={800}
             height={600}
-            onMouseDown={handlePointerDown}
-            onMouseMove={handlePointerMove}
-            onMouseUp={handlePointerUp}
-            onMouseLeave={handlePointerUp}
-            onTouchStart={handlePointerDown}
-            onTouchMove={handlePointerMove}
-            onTouchEnd={handlePointerUp}
+            onPointerDown={handlePointerDown}
+            onPointerMove={handlePointerMove}
+            onPointerUp={handlePointerUp}
+            onPointerLeave={handlePointerUp}
             style={{
               border: '2px solid #ddd',
               borderRadius: '8px',

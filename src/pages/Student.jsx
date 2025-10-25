@@ -100,12 +100,20 @@ function Student() {
     }
   }, [studentLines, channel, clientId]);
 
+  const isAllowedPointerEvent = (evt) => {
+    if (inputMode !== 'stylus-only') return true;
+    return evt?.pointerType === 'pen';
+  };
+
   const handlePointerDown = (e) => {
     const evt = e.evt;
 
     // Stylus-only mode: only accept pointerType === 'pen'
-    if (inputMode === 'stylus-only' && evt.pointerType !== 'pen') {
-      console.log('Blocked: Not a stylus (pointerType:', evt.pointerType, ')');
+    if (!isAllowedPointerEvent(evt)) {
+      console.log('Blocked: Not a stylus (pointerType:', evt?.pointerType, ')');
+      if (evt?.preventDefault) {
+        evt.preventDefault();
+      }
       return;
     }
 
@@ -138,6 +146,14 @@ function Student() {
 
   const handlePointerMove = (e) => {
     if (!isDrawing) return;
+
+    const evt = e.evt;
+    if (!isAllowedPointerEvent(evt)) {
+      if (evt?.preventDefault) {
+        evt.preventDefault();
+      }
+      return;
+    }
 
     const stage = e.target.getStage();
     const point = stage.getPointerPosition();
@@ -177,13 +193,19 @@ function Student() {
     }
 
     // Prevent default to avoid scrolling on touch devices
-    const evt = e.evt;
-    if (evt.preventDefault) {
+    if (evt?.preventDefault) {
       evt.preventDefault();
     }
   };
 
-  const handlePointerUp = () => {
+  const handlePointerUp = (e) => {
+    const evt = e?.evt;
+    if (!isAllowedPointerEvent(evt)) {
+      if (evt?.preventDefault) {
+        evt.preventDefault();
+      }
+      return;
+    }
     setIsDrawing(false);
   };
 
@@ -269,13 +291,10 @@ function Student() {
         <Stage
           width={800}
           height={600}
-          onMouseDown={handlePointerDown}
-          onMouseMove={handlePointerMove}
-          onMouseUp={handlePointerUp}
-          onMouseLeave={handlePointerUp}
-          onTouchStart={handlePointerDown}
-          onTouchMove={handlePointerMove}
-          onTouchEnd={handlePointerUp}
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
+          onPointerLeave={handlePointerUp}
           style={{
             border: '2px solid #ddd',
             borderRadius: '8px',
