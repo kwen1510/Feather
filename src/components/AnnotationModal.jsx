@@ -16,6 +16,7 @@ import './AnnotationModal.css';
 const AnnotationModal = ({ student, isOpen, onClose, onAnnotate, existingAnnotations = [] }) => {
   // Drawing state
   const [tool, setTool] = useState('pen');
+  const [color, setColor] = useState('#FF0000');
   const [isDrawing, setIsDrawing] = useState(false);
   const [teacherAnnotations, setTeacherAnnotations] = useState([]);
   const [inputMode, setInputMode] = useState('all'); // 'all' or 'stylus-only'
@@ -69,7 +70,7 @@ const AnnotationModal = ({ student, isOpen, onClose, onAnnotate, existingAnnotat
       const newLine = {
         tool: 'pen',
         points: [pos.x, pos.y],
-        color: '#FF0000', // Red for teacher annotations
+        color: color,
         strokeWidth: 3,
       };
 
@@ -227,6 +228,43 @@ const AnnotationModal = ({ student, isOpen, onClose, onAnnotate, existingAnnotat
             <button onClick={handleUndo} className="btn">Undo</button>
             <button onClick={handleRedo} className="btn">Redo</button>
             <button onClick={handleClear} className="btn btn-danger">Clear</button>
+          </div>
+
+          <div className="tool-group">
+            <span style={{ marginRight: '10px', color: '#666', fontSize: '14px' }}>Color:</span>
+            <button
+              onClick={() => setColor('#FF0000')}
+              className={`btn ${color === '#FF0000' ? 'btn-active' : ''}`}
+              style={{
+                background: color === '#FF0000' ? '#FF0000' : 'white',
+                color: color === '#FF0000' ? 'white' : '#FF0000',
+                border: '2px solid #FF0000'
+              }}
+            >
+              Red
+            </button>
+            <button
+              onClick={() => setColor('#9933FF')}
+              className={`btn ${color === '#9933FF' ? 'btn-active' : ''}`}
+              style={{
+                background: color === '#9933FF' ? '#9933FF' : 'white',
+                color: color === '#9933FF' ? 'white' : '#9933FF',
+                border: '2px solid #9933FF'
+              }}
+            >
+              Purple
+            </button>
+            <button
+              onClick={() => setColor('#00CED1')}
+              className={`btn ${color === '#00CED1' ? 'btn-active' : ''}`}
+              style={{
+                background: color === '#00CED1' ? '#00CED1' : 'white',
+                color: color === '#00CED1' ? 'white' : '#00CED1',
+                border: '2px solid #00CED1'
+              }}
+            >
+              Teal
+            </button>
           </div>
 
           <div className="tool-group">

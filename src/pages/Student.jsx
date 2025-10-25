@@ -19,6 +19,7 @@ function Student() {
 
   // Drawing state
   const [tool, setTool] = useState('pen');
+  const [color, setColor] = useState('black');
   const [isDrawing, setIsDrawing] = useState(false);
   const [inputMode, setInputMode] = useState('all'); // 'all' or 'stylus-only'
 
@@ -123,7 +124,7 @@ function Student() {
       const newLine = {
         tool,
         points: [pos.x, pos.y],
-        color: 'black',
+        color: color,
         strokeWidth: 3,
       };
 
@@ -268,6 +269,43 @@ function Student() {
           <button onClick={handleUndo} className="btn">Undo</button>
           <button onClick={handleRedo} className="btn">Redo</button>
           <button onClick={handleClear} className="btn btn-danger">Clear</button>
+        </div>
+
+        <div className="tool-group">
+          <span style={{ marginRight: '10px', color: '#666', fontSize: '14px' }}>Color:</span>
+          <button
+            onClick={() => setColor('#0066FF')}
+            className={`btn ${color === '#0066FF' ? 'btn-active' : ''}`}
+            style={{
+              background: color === '#0066FF' ? '#0066FF' : 'white',
+              color: color === '#0066FF' ? 'white' : '#0066FF',
+              border: '2px solid #0066FF'
+            }}
+          >
+            Blue
+          </button>
+          <button
+            onClick={() => setColor('black')}
+            className={`btn ${color === 'black' ? 'btn-active' : ''}`}
+            style={{
+              background: color === 'black' ? 'black' : 'white',
+              color: color === 'black' ? 'white' : 'black',
+              border: '2px solid black'
+            }}
+          >
+            Black
+          </button>
+          <button
+            onClick={() => setColor('#00AA00')}
+            className={`btn ${color === '#00AA00' ? 'btn-active' : ''}`}
+            style={{
+              background: color === '#00AA00' ? '#00AA00' : 'white',
+              color: color === '#00AA00' ? 'white' : '#00AA00',
+              border: '2px solid #00AA00'
+            }}
+          >
+            Green
+          </button>
         </div>
 
         <div className="tool-group">
