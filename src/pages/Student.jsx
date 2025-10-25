@@ -32,6 +32,9 @@ function Student() {
   const isRemoteUpdate = useRef(false);
   const eraserStateSaved = useRef(false);
 
+  const canvasWrapperRef = useRef(null);
+  const [canvasDimensions, setCanvasDimensions] = useState({ width: 800, height: 600 });
+
   // Initialize Ably connection
   useEffect(() => {
     const initAbly = async () => {
@@ -91,6 +94,40 @@ function Student() {
 
     initAbly();
   }, [clientId, roomId]);
+
+  // Dynamic canvas sizing
+  useEffect(() => {
+    const updateCanvasSize = () => {
+      if (canvasWrapperRef.current) {
+        const wrapper = canvasWrapperRef.current;
+        const rect = wrapper.getBoundingClientRect();
+
+        // Account for padding (2rem = 32px on each side)
+        const padding = 64;
+        const maxWidth = rect.width - padding;
+        const maxHeight = rect.height - padding;
+
+        setCanvasDimensions({
+          width: Math.floor(maxWidth),
+          height: Math.floor(maxHeight)
+        });
+      }
+    };
+
+    // Initial size
+    updateCanvasSize();
+
+    // Update on window resize
+    window.addEventListener('resize', updateCanvasSize);
+
+    // Small delay to ensure layout is complete
+    const timer = setTimeout(updateCanvasSize, 100);
+
+    return () => {
+      window.removeEventListener('resize', updateCanvasSize);
+      clearTimeout(timer);
+    };
+  }, [toolbarPosition]); // Re-calculate when toolbar position changes
 
   // Sync student lines to Ably
   useEffect(() => {
@@ -370,10 +407,10 @@ function Student() {
         </div>
 
         {/* Canvas */}
-        <div className="student-canvas-wrapper">
+        <div className="student-canvas-wrapper" ref={canvasWrapperRef}>
           <Stage
-            width={1000}
-            height={700}
+            width={canvasDimensions.width}
+            height={canvasDimensions.height}
             onPointerDown={handlePointerDown}
             onPointerMove={handlePointerMove}
             onPointerUp={handlePointerUp}
