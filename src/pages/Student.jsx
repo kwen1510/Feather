@@ -113,15 +113,41 @@ function Student() {
     });
 
     if (inputMode === 'stylus-only') {
-      // In stylus-only mode, ONLY allow pointerType === 'pen' (true stylus)
-      // Don't use touch events as fallback - they can be palm/finger touches
-      const isStylus = evt.pointerType === 'pen';
+      // Stylus detection for different devices
+      const isStylusByPointerType = evt.pointerType === 'pen';
+
+      // Samsung tablets with S-Pen don't always report pointerType correctly
+      // Check for small touch radius (stylus is more precise than finger/palm)
+      const hasSmallRadius = evt.radiusX !== undefined && evt.radiusY !== undefined &&
+                             evt.radiusX < 10 && evt.radiusY < 10;
+
+      // Check for pressure data (stylus often has this, fingers don't)
+      const hasPressure = evt.pressure !== undefined && evt.pressure > 0;
+
+      // Single precise touch (likely stylus, not palm which is larger)
+      const isSingleTouch = evt.type === 'touchstart' && evt.targetTouches?.length === 1;
+      const touchRadius = evt.targetTouches?.[0]?.radiusX;
+      const isSmallTouch = touchRadius !== undefined && touchRadius < 15;
+
+      const isStylus = isStylusByPointerType ||
+                       (hasSmallRadius && hasPressure) ||
+                       (isSingleTouch && isSmallTouch);
+
+      console.log('Stylus detection:', {
+        pointerType: evt.pointerType,
+        radiusX: evt.radiusX,
+        radiusY: evt.radiusY,
+        pressure: evt.pressure,
+        touches: evt.targetTouches?.length,
+        touchRadius: touchRadius,
+        isStylus: isStylus
+      });
 
       if (!isStylus) {
-        console.log('Blocked: Not a stylus input (pointerType:', evt.pointerType, ')');
-        return; // Ignore non-stylus input in stylus-only mode
+        console.log('Blocked: Not a stylus input');
+        return;
       }
-      console.log('Allowed: Stylus detected (pointerType: pen)');
+      console.log('Allowed: Stylus detected');
     }
 
     if (tool === 'pen') {
