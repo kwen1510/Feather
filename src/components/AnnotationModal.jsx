@@ -47,53 +47,12 @@ const AnnotationModal = ({ student, isOpen, onClose, onAnnotate, existingAnnotat
   };
 
   const handlePointerDown = (e) => {
-    // Check input mode - if stylus-only, only allow pen input
     const evt = e.evt;
 
-    // Debug logging
-    console.log('Input detected:', {
-      pointerType: evt.pointerType,
-      type: evt.type,
-      touchType: evt.targetTouches?.length,
-      inputMode: inputMode
-    });
-
-    if (inputMode === 'stylus-only') {
-      // Stylus detection for different devices
-      const isStylusByPointerType = evt.pointerType === 'pen';
-
-      // Samsung tablets with S-Pen don't always report pointerType correctly
-      // Check for small touch radius (stylus is more precise than finger/palm)
-      const hasSmallRadius = evt.radiusX !== undefined && evt.radiusY !== undefined &&
-                             evt.radiusX < 10 && evt.radiusY < 10;
-
-      // Check for pressure data (stylus often has this, fingers don't)
-      const hasPressure = evt.pressure !== undefined && evt.pressure > 0;
-
-      // Single precise touch (likely stylus, not palm which is larger)
-      const isSingleTouch = evt.type === 'touchstart' && evt.targetTouches?.length === 1;
-      const touchRadius = evt.targetTouches?.[0]?.radiusX;
-      const isSmallTouch = touchRadius !== undefined && touchRadius < 15;
-
-      const isStylus = isStylusByPointerType ||
-                       (hasSmallRadius && hasPressure) ||
-                       (isSingleTouch && isSmallTouch);
-
-      console.log('Stylus detection:', {
-        pointerType: evt.pointerType,
-        radiusX: evt.radiusX,
-        radiusY: evt.radiusY,
-        pressure: evt.pressure,
-        touches: evt.targetTouches?.length,
-        touchRadius: touchRadius,
-        isStylus: isStylus
-      });
-
-      if (!isStylus) {
-        console.log('Blocked: Not a stylus input');
-        return;
-      }
-      console.log('Allowed: Stylus detected');
+    // Stylus-only mode: only accept pointerType === 'pen'
+    if (inputMode === 'stylus-only' && evt.pointerType !== 'pen') {
+      console.log('Blocked: Not a stylus (pointerType:', evt.pointerType, ')');
+      return;
     }
 
     if (tool === 'pen') {
