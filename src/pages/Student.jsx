@@ -61,14 +61,17 @@ function Student() {
           }
         });
 
-        // Listen for teacher layer updates
-        whiteboardChannel.subscribe('teacher-layer', (message) => {
-          console.log('Received teacher layer update from', message.clientId);
-          isRemoteUpdate.current = true;
-          setTeacherLines(message.data.lines || []);
-          setTimeout(() => {
-            isRemoteUpdate.current = false;
-          }, 100);
+        // Listen for teacher annotations and filter by targetStudentId
+        whiteboardChannel.subscribe('teacher-annotation', (message) => {
+          // Only update if this annotation is for me
+          if (message.data.targetStudentId === clientId) {
+            console.log('📥 Received teacher annotation from', message.data.teacherId, 'for me');
+            isRemoteUpdate.current = true;
+            setTeacherLines(message.data.annotations || []);
+            setTimeout(() => {
+              isRemoteUpdate.current = false;
+            }, 100);
+          }
         });
 
         setChannel(whiteboardChannel);
@@ -227,8 +230,8 @@ function Student() {
 
       <div className="canvas-container">
         <Stage
-          width={1200}
-          height={700}
+          width={800}
+          height={600}
           onMouseDown={handleMouseDown}
           onMousemove={handleMouseMove}
           onMouseup={handleMouseUp}

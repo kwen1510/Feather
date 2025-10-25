@@ -1,0 +1,240 @@
+.annotation-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  animation: fadeIn 0.2s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.annotation-modal {
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  width: fit-content;
+  max-width: 95vw;
+  max-height: 95vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: slideUp 0.3s ease;
+}
+
+@keyframes slideUp {
+  from {
+    transform: translateY(20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+/* Header */
+.annotation-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 24px;
+  border-bottom: 2px solid #e0e0e0;
+  background: #f5f5f5;
+}
+
+/* Toolbar */
+.annotation-toolbar {
+  padding: 12px 24px;
+  background: white;
+  border-bottom: 2px solid #e0e0e0;
+}
+
+.annotation-toolbar .tool-group {
+  display: flex;
+  gap: 8px;
+}
+
+.annotation-toolbar .btn {
+  padding: 8px 16px;
+  background: white;
+  border: 2px solid #ddd;
+  border-radius: 6px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-size: 14px;
+}
+
+.annotation-toolbar .btn:hover {
+  background: #f5f5f5;
+  border-color: #ccc;
+}
+
+.annotation-toolbar .btn-active {
+  background: #4CAF50;
+  color: white;
+  border-color: #4CAF50;
+}
+
+.annotation-toolbar .btn-active:hover {
+  background: #45a049;
+  border-color: #45a049;
+}
+
+.annotation-toolbar .btn-danger {
+  background: #f44336;
+  color: white;
+  border-color: #f44336;
+}
+
+.annotation-toolbar .btn-danger:hover {
+  background: #d32f2f;
+  border-color: #d32f2f;
+}
+
+.student-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.student-info h2 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+  color: #333;
+}
+
+.annotation-mode {
+  background: #FF5722;
+  color: white;
+  padding: 4px 12px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.header-actions {
+  display: flex;
+  gap: 12px;
+}
+
+.clear-btn {
+  padding: 8px 16px;
+  background: white;
+  border: 2px solid #FF9800;
+  color: #FF9800;
+  border-radius: 6px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.clear-btn:hover:not(:disabled) {
+  background: #FF9800;
+  color: white;
+}
+
+.clear-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.close-btn {
+  padding: 8px 16px;
+  background: #f44336;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.close-btn:hover {
+  background: #d32f2f;
+}
+
+/* Canvas Container */
+.annotation-canvas-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: #fafafa;
+  position: relative;
+  overflow: auto;
+  min-height: 0;
+}
+
+.annotation-canvas-container canvas {
+  border: 2px solid #ddd;
+  border-radius: 8px;
+  background: white;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+/* Instructions */
+.annotation-instructions {
+  position: absolute;
+  top: 32px;
+  left: 32px;
+  background: rgba(255, 255, 255, 0.95);
+  padding: 12px 16px;
+  border-radius: 8px;
+  border-left: 4px solid #FF5722;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.annotation-instructions p {
+  margin: 4px 0;
+  font-size: 13px;
+  color: #666;
+}
+
+.red-text {
+  color: #FF0000;
+  font-weight: 600;
+}
+
+/* Footer */
+.annotation-modal-footer {
+  display: flex;
+  justify-content: center;
+  gap: 48px;
+  padding: 16px 24px;
+  border-top: 2px solid #e0e0e0;
+  background: #f5f5f5;
+}
+
+.stat {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.stat-label {
+  font-size: 14px;
+  color: #666;
+}
+
+.stat-value {
+  font-size: 18px;
+  font-weight: 700;
+  color: #333;
+}
+
+.stat-value.red-text {
+  color: #FF0000;
+}

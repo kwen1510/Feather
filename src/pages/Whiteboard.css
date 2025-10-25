@@ -191,12 +191,7 @@
   position: relative;
 }
 
-.canvas-container > div {
-  width: 100%;
-  height: 100%;
-  max-width: 1400px;
-  max-height: 800px;
-}
+/* Don't override Stage dimensions - let canvas be its natural size */
 
 /* tldraw container */
 .tldraw-container {
