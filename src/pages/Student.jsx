@@ -20,6 +20,7 @@ function Student() {
   // Drawing state
   const [tool, setTool] = useState('pen');
   const [isDrawing, setIsDrawing] = useState(false);
+  const [inputMode, setInputMode] = useState('all'); // 'all' or 'stylus-only'
 
   // Undo/redo stacks
   const undoStack = useRef([]);
@@ -98,7 +99,17 @@ function Student() {
     }
   }, [studentLines, channel, clientId]);
 
-  const handleMouseDown = (e) => {
+  const handlePointerDown = (e) => {
+    // Check input mode - if stylus-only, only allow pen input
+    const evt = e.evt;
+    if (inputMode === 'stylus-only') {
+      // In stylus-only mode, only allow pointerType === 'pen' (stylus)
+      // Block mouse (MouseEvent) and touch (TouchEvent without pen type)
+      if (!evt.pointerType || evt.pointerType !== 'pen') {
+        return; // Ignore non-stylus input in stylus-only mode
+      }
+    }
+
     if (tool === 'pen') {
       setIsDrawing(true);
       const pos = e.target.getStage().getPointerPosition();
@@ -119,9 +130,14 @@ function Student() {
       setIsDrawing(true);
       eraserStateSaved.current = false; // Reset flag for new erase session
     }
+
+    // Prevent default to avoid scrolling on touch devices
+    if (evt.preventDefault) {
+      evt.preventDefault();
+    }
   };
 
-  const handleMouseMove = (e) => {
+  const handlePointerMove = (e) => {
     if (!isDrawing) return;
 
     const stage = e.target.getStage();
@@ -160,9 +176,15 @@ function Student() {
 
       setStudentLines(linesToKeep);
     }
+
+    // Prevent default to avoid scrolling on touch devices
+    const evt = e.evt;
+    if (evt.preventDefault) {
+      evt.preventDefault();
+    }
   };
 
-  const handleMouseUp = () => {
+  const handlePointerUp = () => {
     setIsDrawing(false);
   };
 
@@ -226,16 +248,41 @@ function Student() {
           <button onClick={handleRedo} className="btn">Redo</button>
           <button onClick={handleClear} className="btn btn-danger">Clear</button>
         </div>
+
+        <div className="tool-group">
+          <span style={{ marginRight: '10px', color: '#666', fontSize: '14px' }}>Input Mode:</span>
+          <button
+            onClick={() => setInputMode('all')}
+            className={`btn ${inputMode === 'all' ? 'btn-active' : ''}`}
+          >
+            All Inputs
+          </button>
+          <button
+            onClick={() => setInputMode('stylus-only')}
+            className={`btn ${inputMode === 'stylus-only' ? 'btn-active' : ''}`}
+          >
+            Stylus Only
+          </button>
+        </div>
       </div>
 
       <div className="canvas-container">
         <Stage
           width={800}
           height={600}
-          onMouseDown={handleMouseDown}
-          onMousemove={handleMouseMove}
-          onMouseup={handleMouseUp}
-          style={{ border: '2px solid #ddd', borderRadius: '8px', background: 'white' }}
+          onMouseDown={handlePointerDown}
+          onMouseMove={handlePointerMove}
+          onMouseUp={handlePointerUp}
+          onMouseLeave={handlePointerUp}
+          onTouchStart={handlePointerDown}
+          onTouchMove={handlePointerMove}
+          onTouchEnd={handlePointerUp}
+          style={{
+            border: '2px solid #ddd',
+            borderRadius: '8px',
+            background: 'white',
+            touchAction: 'none'
+          }}
         >
           {/* Student layer (editable) */}
           <Layer>

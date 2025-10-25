@@ -103,6 +103,7 @@
   display: flex;
   align-items: center;
   gap: 0.75rem;
+  flex-wrap: wrap;
 }
 
 .tool-group label {
@@ -189,6 +190,14 @@
   justify-content: center;
   align-items: center;
   position: relative;
+  touch-action: none; /* Prevent default touch behaviors like scrolling */
+  -webkit-overflow-scrolling: touch; /* Smooth scrolling on iOS */
+}
+
+.canvas-container canvas {
+  touch-action: none; /* Prevent default touch behaviors */
+  -webkit-user-select: none; /* Prevent text selection on touch */
+  user-select: none;
 }
 
 /* Don't override Stage dimensions - let canvas be its natural size */

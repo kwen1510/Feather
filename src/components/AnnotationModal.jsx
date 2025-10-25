@@ -18,6 +18,7 @@ const AnnotationModal = ({ student, isOpen, onClose, onAnnotate, existingAnnotat
   const [tool, setTool] = useState('pen');
   const [isDrawing, setIsDrawing] = useState(false);
   const [teacherAnnotations, setTeacherAnnotations] = useState([]);
+  const [inputMode, setInputMode] = useState('all'); // 'all' or 'stylus-only'
 
   // Undo/redo stacks
   const undoStack = useRef([]);
@@ -45,7 +46,17 @@ const AnnotationModal = ({ student, isOpen, onClose, onAnnotate, existingAnnotat
     return match ? `Student ${match[1]}` : student.clientId;
   };
 
-  const handleMouseDown = (e) => {
+  const handlePointerDown = (e) => {
+    // Check input mode - if stylus-only, only allow pen input
+    const evt = e.evt;
+    if (inputMode === 'stylus-only') {
+      // In stylus-only mode, only allow pointerType === 'pen' (stylus)
+      // Block mouse (MouseEvent) and touch (TouchEvent without pen type)
+      if (!evt.pointerType || evt.pointerType !== 'pen') {
+        return; // Ignore non-stylus input in stylus-only mode
+      }
+    }
+
     if (tool === 'pen') {
       setIsDrawing(true);
       const pos = e.target.getStage().getPointerPosition();
@@ -66,9 +77,14 @@ const AnnotationModal = ({ student, isOpen, onClose, onAnnotate, existingAnnotat
       setIsDrawing(true);
       eraserStateSaved.current = false; // Reset flag for new erase session
     }
+
+    // Prevent default to avoid scrolling on touch devices
+    if (evt.preventDefault) {
+      evt.preventDefault();
+    }
   };
 
-  const handleMouseMove = (e) => {
+  const handlePointerMove = (e) => {
     if (!isDrawing) return;
 
     const stage = e.target.getStage();
@@ -107,9 +123,15 @@ const AnnotationModal = ({ student, isOpen, onClose, onAnnotate, existingAnnotat
 
       setTeacherAnnotations(linesToKeep);
     }
+
+    // Prevent default to avoid scrolling on touch devices
+    const evt = e.evt;
+    if (evt.preventDefault) {
+      evt.preventDefault();
+    }
   };
 
-  const handleMouseUp = () => {
+  const handlePointerUp = () => {
     setIsDrawing(false);
     // Publish after drawing/erasing is complete
     onAnnotate(teacherAnnotations);
@@ -186,6 +208,22 @@ const AnnotationModal = ({ student, isOpen, onClose, onAnnotate, existingAnnotat
             <button onClick={handleRedo} className="btn">Redo</button>
             <button onClick={handleClear} className="btn btn-danger">Clear</button>
           </div>
+
+          <div className="tool-group">
+            <span style={{ marginRight: '10px', color: '#666', fontSize: '14px' }}>Input Mode:</span>
+            <button
+              onClick={() => setInputMode('all')}
+              className={`btn ${inputMode === 'all' ? 'btn-active' : ''}`}
+            >
+              All Inputs
+            </button>
+            <button
+              onClick={() => setInputMode('stylus-only')}
+              className={`btn ${inputMode === 'stylus-only' ? 'btn-active' : ''}`}
+            >
+              Stylus Only
+            </button>
+          </div>
         </div>
 
         {/* Canvas */}
@@ -194,11 +232,19 @@ const AnnotationModal = ({ student, isOpen, onClose, onAnnotate, existingAnnotat
             ref={stageRef}
             width={800}
             height={600}
-            onMouseDown={handleMouseDown}
-            onMouseMove={handleMouseMove}
-            onMouseUp={handleMouseUp}
-            onMouseLeave={handleMouseUp}
-            style={{ border: '2px solid #ddd', borderRadius: '8px', background: 'white' }}
+            onMouseDown={handlePointerDown}
+            onMouseMove={handlePointerMove}
+            onMouseUp={handlePointerUp}
+            onMouseLeave={handlePointerUp}
+            onTouchStart={handlePointerDown}
+            onTouchMove={handlePointerMove}
+            onTouchEnd={handlePointerUp}
+            style={{
+              border: '2px solid #ddd',
+              borderRadius: '8px',
+              background: 'white',
+              touchAction: 'none' // Prevent default touch behaviors like scrolling
+            }}
           >
             {/* Student's drawing (read-only, black) */}
             <Layer listening={false}>

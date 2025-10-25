@@ -56,11 +56,17 @@
   padding: 12px 24px;
   background: white;
   border-bottom: 2px solid #e0e0e0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
 }
 
 .annotation-toolbar .tool-group {
   display: flex;
   gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
 }
 
 .annotation-toolbar .btn {
@@ -176,6 +182,8 @@
   position: relative;
   overflow: auto;
   min-height: 0;
+  touch-action: none; /* Prevent default touch behaviors like scrolling */
+  -webkit-overflow-scrolling: touch; /* Smooth scrolling on iOS */
 }
 
 .annotation-canvas-container canvas {
@@ -183,6 +191,9 @@
   border-radius: 8px;
   background: white;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  touch-action: none; /* Prevent default touch behaviors */
+  -webkit-user-select: none; /* Prevent text selection on touch */
+  user-select: none;
 }
 
 /* Instructions */
