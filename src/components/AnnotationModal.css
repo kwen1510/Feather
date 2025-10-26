@@ -286,6 +286,114 @@
   user-select: none;
 }
 
+/* Landscape tablet mode - reduce spacing to fit all items */
+@media (max-height: 700px) and (orientation: landscape) {
+  .annotation-console {
+    padding: 1rem;
+    gap: 0.75rem;
+  }
+
+  .annotation-sidebar {
+    padding: 0.75rem;
+    gap: 0.6rem;
+    flex: 0 0 220px;
+  }
+
+  .sidebar-header h2 {
+    font-size: 1rem;
+  }
+
+  .sidebar-header p {
+    font-size: 0.75rem;
+    margin: 0.1rem 0 0;
+  }
+
+  .sidebar-section {
+    gap: 0.4rem;
+  }
+
+  .sidebar-label {
+    font-size: 0.65rem;
+  }
+
+  .color-button {
+    width: 32px;
+    height: 32px;
+  }
+
+  .tool-button {
+    padding: 0.5rem 0.75rem;
+    font-size: 0.85rem;
+  }
+
+  .history-button {
+    padding: 0.45rem 0.75rem;
+    font-size: 0.85rem;
+  }
+
+  .input-mode-toggle {
+    padding: 0.4rem 0.75rem;
+    font-size: 0.85rem;
+  }
+
+  .annotation-status-bar {
+    gap: 0.5rem;
+  }
+
+  .annotation-status-text h1 {
+    font-size: 1.1rem;
+  }
+
+  .annotation-status-text p {
+    font-size: 0.8rem;
+  }
+
+  .flag-pill, .status-badge {
+    padding: 0.4rem 0.75rem;
+    font-size: 0.8rem;
+  }
+}
+
+/* Very small landscape (phones in landscape) */
+@media (max-height: 500px) and (orientation: landscape) {
+  .annotation-sidebar {
+    padding: 0.5rem;
+    gap: 0.4rem;
+    flex: 0 0 180px;
+  }
+
+  .sidebar-header {
+    display: none;
+  }
+
+  .sidebar-section {
+    gap: 0.3rem;
+  }
+
+  .sidebar-label {
+    font-size: 0.6rem;
+  }
+
+  .color-button {
+    width: 28px;
+    height: 28px;
+  }
+
+  .tool-button, .history-button {
+    padding: 0.35rem 0.5rem;
+    font-size: 0.75rem;
+  }
+
+  .input-mode-toggle {
+    padding: 0.3rem 0.5rem;
+    font-size: 0.75rem;
+  }
+
+  .brush-size-control {
+    gap: 0.4rem;
+  }
+}
+
 @media (max-width: 900px) {
   .annotation-workspace {
     flex-direction: column;
