@@ -75,6 +75,8 @@ const TeacherDashboard = () => {
     const saved = localStorage.getItem('teacherDashboardCardsPerRow');
     return saved ? parseInt(saved) : 3;
   });
+  const [prepTab, setPrepTab] = useState('blank'); // 'blank' | 'templates' | 'image'
+  const [stagedTemplate, setStagedTemplate] = useState(null); // Selected template type and data
   const [stagedImage, setStagedImage] = useState(null); // Image preview before sending
   const [imageMessage, setImageMessage] = useState('');
   const [isUploadingImage, setIsUploadingImage] = useState(false);
@@ -316,6 +318,171 @@ const TeacherDashboard = () => {
     }
   };
 
+  // Template generation functions
+  const generateTemplate = (type) => {
+    const canvas = document.createElement('canvas');
+    const BASE_WIDTH = 800;
+    const BASE_HEIGHT = 600;
+    canvas.width = BASE_WIDTH;
+    canvas.height = BASE_HEIGHT;
+    const ctx = canvas.getContext('2d');
+
+    // Clear canvas with white background
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillRect(0, 0, BASE_WIDTH, BASE_HEIGHT);
+
+    if (type === 'hanzi') {
+      // Hanzi box template - box with cross guides
+      const boxSize = 450;
+      const boxX = (BASE_WIDTH - boxSize) / 2;
+      const boxY = (BASE_HEIGHT - boxSize) / 2;
+
+      // Outer box (green)
+      ctx.strokeStyle = '#0F9D83';
+      ctx.lineWidth = 4;
+      ctx.strokeRect(boxX, boxY, boxSize, boxSize);
+
+      // Cross guides (light dotted)
+      ctx.strokeStyle = '#B0E8D8';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([8, 8]);
+
+      // Vertical center line
+      ctx.beginPath();
+      ctx.moveTo(BASE_WIDTH / 2, boxY);
+      ctx.lineTo(BASE_WIDTH / 2, boxY + boxSize);
+      ctx.stroke();
+
+      // Horizontal center line
+      ctx.beginPath();
+      ctx.moveTo(boxX, BASE_HEIGHT / 2);
+      ctx.lineTo(boxX + boxSize, BASE_HEIGHT / 2);
+      ctx.stroke();
+
+    } else if (type === 'graph-corner') {
+      // Graph with axes at corner
+      const margin = 80;
+      const gridSize = 40;
+
+      // Grid lines (light)
+      ctx.strokeStyle = '#E0E0E0';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([]);
+
+      for (let x = margin; x <= BASE_WIDTH - margin; x += gridSize) {
+        ctx.beginPath();
+        ctx.moveTo(x, margin);
+        ctx.lineTo(x, BASE_HEIGHT - margin);
+        ctx.stroke();
+      }
+
+      for (let y = margin; y <= BASE_HEIGHT - margin; y += gridSize) {
+        ctx.beginPath();
+        ctx.moveTo(margin, y);
+        ctx.lineTo(BASE_WIDTH - margin, y);
+        ctx.stroke();
+      }
+
+      // Axes (blue, thicker)
+      ctx.strokeStyle = '#5B9BD5';
+      ctx.lineWidth = 3;
+
+      // X-axis (bottom-left)
+      ctx.beginPath();
+      ctx.moveTo(margin, BASE_HEIGHT - margin);
+      ctx.lineTo(BASE_WIDTH - margin, BASE_HEIGHT - margin);
+      ctx.stroke();
+
+      // Y-axis (bottom-left)
+      ctx.beginPath();
+      ctx.moveTo(margin, margin);
+      ctx.lineTo(margin, BASE_HEIGHT - margin);
+      ctx.stroke();
+
+    } else if (type === 'graph-cross') {
+      // Graph with axes through center
+      const margin = 80;
+      const gridSize = 40;
+
+      // Grid lines (light)
+      ctx.strokeStyle = '#E0E0E0';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([]);
+
+      for (let x = margin; x <= BASE_WIDTH - margin; x += gridSize) {
+        ctx.beginPath();
+        ctx.moveTo(x, margin);
+        ctx.lineTo(x, BASE_HEIGHT - margin);
+        ctx.stroke();
+      }
+
+      for (let y = margin; y <= BASE_HEIGHT - margin; y += gridSize) {
+        ctx.beginPath();
+        ctx.moveTo(margin, y);
+        ctx.lineTo(BASE_WIDTH - margin, y);
+        ctx.stroke();
+      }
+
+      // Axes (blue, thicker, through center)
+      ctx.strokeStyle = '#5B9BD5';
+      ctx.lineWidth = 3;
+
+      // X-axis (center horizontal)
+      ctx.beginPath();
+      ctx.moveTo(margin, BASE_HEIGHT / 2);
+      ctx.lineTo(BASE_WIDTH - margin, BASE_HEIGHT / 2);
+      ctx.stroke();
+
+      // Y-axis (center vertical)
+      ctx.beginPath();
+      ctx.moveTo(BASE_WIDTH / 2, margin);
+      ctx.lineTo(BASE_WIDTH / 2, BASE_HEIGHT - margin);
+      ctx.stroke();
+    }
+
+    const dataUrl = canvas.toDataURL('image/png');
+    return {
+      type,
+      dataUrl,
+      width: BASE_WIDTH,
+      height: BASE_HEIGHT,
+      timestamp: Date.now(),
+    };
+  };
+
+  const handleTemplateSelect = (type) => {
+    const template = generateTemplate(type);
+    setStagedTemplate(template);
+    setImageMessage(`Template ready: ${type}`);
+  };
+
+  const handleSendToClass = async () => {
+    if (!channel) return;
+
+    try {
+      if (prepTab === 'blank') {
+        // Clear any existing template/image
+        await channel.publish('teacher-clear', { timestamp: Date.now() });
+        setSharedImage(null);
+        setStagedTemplate(null);
+        setImageMessage('Cleared canvas for all students.');
+      } else if (prepTab === 'templates' && stagedTemplate) {
+        // Send template
+        await channel.publish('teacher-template', stagedTemplate);
+        setSharedImage(stagedTemplate); // Store as shared content
+        setImageMessage('Template sent to all students.');
+      } else if (prepTab === 'image' && stagedImage) {
+        // Send image
+        await channel.publish('teacher-image', stagedImage);
+        setSharedImage(stagedImage);
+        setImageMessage('Image sent to all students.');
+      }
+    } catch (error) {
+      console.error('Failed to send to class:', error);
+      setImageMessage('Failed to send. Please try again.');
+    }
+  };
+
   // Handle going back
   const handleBack = () => {
     if (ably) {
@@ -359,102 +526,45 @@ const TeacherDashboard = () => {
   const selectedStudentData = selectedStudent
     ? students[selectedStudent.clientId] || selectedStudent
     : null;
+  const isPositiveImageMessage = imageMessage
+    ? !/fail|no file/i.test(imageMessage)
+    : false;
 
   return (
     <div className="teacher-dashboard">
-      {/* Header */}
-      <div className="dashboard-header">
-        <div className="header-left">
-          <button className="back-btn" onClick={handleBack}>
-            ← Back
-          </button>
-          <h1>Teacher Dashboard</h1>
-        </div>
+      <div className="dashboard-shell">
+        <button className="back-link" onClick={handleBack}>
+          ← Exit class
+        </button>
 
-        <div className="header-center">
-          <div className="room-code-display">
-            <div className="room-code-label">Room Code</div>
-            <div className="room-code-value">{roomId}</div>
-            <div className="room-code-hint">Share this code with students</div>
-          </div>
-        </div>
-
-        <div className="header-right">
-          <div className="connection-status">
-            <span className={`status-dot ${isConnected ? 'online' : 'offline'}`}></span>
-            {isConnected ? 'Connected' : 'Disconnected'}
-          </div>
-          <div className="student-count">
-            <span className="count-number">{activeCount}</span>
-            <span className="count-label">Active Student{activeCount !== 1 ? 's' : ''}</span>
-          </div>
-        </div>
-      </div>
-
-      {/* Main Content */}
-      <div className="dashboard-content">
-        {/* Image Sharing Panel */}
-        <div className="image-sharing-panel">
-          <div className="image-panel-header">
-            <span className="panel-icon">📸</span>
-            <h3>Share Image with Students</h3>
-          </div>
-
-          <div className="image-panel-content">
-            <input
-              ref={imageInputRef}
-              type="file"
-              accept="image/*"
-              onChange={handleImageUpload}
-              style={{ display: 'none' }}
-            />
-
-            {!stagedImage ? (
-              <div className="image-upload-area">
-                <button
-                  className="upload-image-btn"
-                  onClick={handleImageInputClick}
-                  disabled={isUploadingImage}
-                >
-                  {isUploadingImage ? 'Uploading…' : 'Choose Image'}
-                </button>
-                {imageMessage && (
-                  <span className="image-message">{imageMessage}</span>
-                )}
+        <section className="hero-card glass-panel">
+          <div className="hero-top">
+            <div className="hero-copy">
+              <p className="eyebrow">Teacher dashboard</p>
+              <h1>Monitor every student's canvas and annotate live with the shared toolbar.</h1>
+              <p className="hero-subtitle">
+                Share the session code below to invite students. You'll see their canvases appear in real time as they connect.
+              </p>
+            </div>
+            <div className="session-info">
+              <div className="session-code-pill">
+                <span className="pill-label">Session code</span>
+                <span className="pill-value">{roomId}</span>
               </div>
-            ) : (
-              <div className="image-preview-area">
-                <div className="preview-label">Preview:</div>
-                <img
-                  src={stagedImage.dataUrl}
-                  alt="Preview"
-                  className="image-preview-thumbnail"
-                />
-                <div className="image-actions">
-                  <button
-                    className="send-image-btn"
-                    onClick={handleSendImage}
-                  >
-                    Send to All Students
-                  </button>
-                  <button
-                    className="clear-image-btn"
-                    onClick={handleClearImage}
-                  >
-                    Clear
-                  </button>
-                </div>
-                {imageMessage && (
-                  <span className="image-message success">{imageMessage}</span>
-                )}
+              <div className="status-group">
+                <span className="status-pill session-pill">Session live</span>
+                <span className={`status-pill connection-pill ${isConnected ? 'online' : 'offline'}`}>
+                  {isConnected ? 'Connected' : 'Disconnected'}
+                </span>
+                <span className="status-pill count-pill">
+                  <strong>{activeCount}</strong>
+                  <span>online</span>
+                </span>
               </div>
-            )}
+            </div>
           </div>
-        </div>
 
-        {/* Search/Filter Bar - Always visible */}
-        <div className="filter-section">
-          <div className="filter-bar">
+          <div className="hero-controls">
             <div className="search-input-wrapper">
               <span className="search-icon">🔍</span>
               <input
@@ -475,77 +585,252 @@ const TeacherDashboard = () => {
               )}
             </div>
 
-            <label className="hide-names-checkbox">
-              <input
-                type="checkbox"
-                checked={hideNames}
-                onChange={(e) => setHideNames(e.target.checked)}
-              />
-              <span>Hide names</span>
-            </label>
-
-            <button
-              type="button"
-              className={`flag-toggle-pill ${flagFilter === 'flagged' ? 'active' : ''}`}
-              onClick={() => setFlagFilter(prev => (prev === 'flagged' ? 'all' : 'flagged'))}
-            >
-              Flagged only
-            </button>
-
-            <select
-              className="cards-per-row-select"
-              value={cardsPerRow}
-              onChange={(e) => setCardsPerRow(Number(e.target.value))}
-            >
-              <option value={2}>Cards/row: 2</option>
-              <option value={3}>Cards/row: 3</option>
-              <option value={4}>Cards/row: 4</option>
-            </select>
-          </div>
-        </div>
-
-        {/* Students Grid or Empty State */}
-        {studentsList.length === 0 ? (
-          <div className="no-students">
-            <div className="no-students-icon">👥</div>
-            <h2>Waiting for Students...</h2>
-            <p>Students will appear here when they join room "{roomId}"</p>
-            <p className="hint">💡 Students can join by entering this room code on the landing page</p>
-          </div>
-        ) : filteredStudents.length === 0 ? (
-          <div className="no-results">
-            <div className="no-results-icon">🔍</div>
-            <h3>No students found</h3>
-            <p>No students match "{searchQuery}"</p>
-            <button className="clear-filter-btn" onClick={() => setSearchQuery('')}>
-              Clear filter
-            </button>
-          </div>
-        ) : (
-          <div
-            className="students-grid"
-            style={{
-              gridTemplateColumns: `repeat(${cardsPerRow}, 1fr)`
-            }}
-          >
-            {filteredStudents
-              .filter(student => student && student.clientId)
-              .map(student => (
-                <StudentCard
-                  key={student.clientId}
-                  student={student}
-                  onClick={handleCardClick}
-                  onToggleFlag={toggleFlag}
-                  teacherAnnotations={teacherAnnotations[student.clientId] || []}
-                  sharedImage={sharedImage}
-                  hideNames={hideNames}
+            <div className="control-set">
+              <label className="hide-names-checkbox">
+                <input
+                  type="checkbox"
+                  checked={hideNames}
+                  onChange={(e) => setHideNames(e.target.checked)}
                 />
-              ))}
+                <span>Hide names</span>
+              </label>
+
+              <button
+                type="button"
+                className={`chip-button ${flagFilter === 'flagged' ? 'active' : ''}`}
+                onClick={() => setFlagFilter(prev => (prev === 'flagged' ? 'all' : 'flagged'))}
+              >
+                Flagged only
+              </button>
+
+              <div className="cards-select">
+                <span>Cards/row</span>
+                <select
+                  value={cardsPerRow}
+                  onChange={(e) => setCardsPerRow(Number(e.target.value))}
+                >
+                  <option value={2}>2</option>
+                  <option value={3}>3</option>
+                  <option value={4}>4</option>
+                </select>
+              </div>
+            </div>
           </div>
-        )}
+        </section>
+
+        <section className="prep-card glass-panel">
+          <div className="prep-header">
+            <div>
+              <p className="eyebrow">Prepare next question</p>
+              {stagedTemplate && (
+                <div style={{ display: 'inline-block', marginLeft: '12px', padding: '4px 12px', background: '#5B9BD5', color: 'white', borderRadius: '12px', fontSize: '13px', fontWeight: '600' }}>
+                  Staged: {stagedTemplate.type === 'hanzi' ? 'Hanzi' : stagedTemplate.type === 'graph-corner' ? 'Graph (corner)' : 'Graph (cross)'}
+                </div>
+              )}
+              <h3>Stage an image or prompt before sending it to every student.</h3>
+            </div>
+            <button
+              className="send-to-class-btn"
+              onClick={handleSendToClass}
+              disabled={prepTab === 'image' && !stagedImage}
+            >
+              Send to class
+            </button>
+          </div>
+
+          <div className="prep-controls">
+            <div className="prep-tabs">
+              <button
+                type="button"
+                className={`prep-tab ${prepTab === 'blank' ? 'active' : ''}`}
+                onClick={() => {
+                  setPrepTab('blank');
+                  setStagedTemplate(null);
+                  setStagedImage(null);
+                }}
+              >
+                Blank canvas
+              </button>
+              <button
+                type="button"
+                className={`prep-tab ${prepTab === 'templates' ? 'active' : ''}`}
+                onClick={() => {
+                  setPrepTab('templates');
+                  setStagedImage(null);
+                }}
+              >
+                Templates
+              </button>
+              <button
+                type="button"
+                className={`prep-tab ${prepTab === 'image' ? 'active' : ''} ${stagedImage ? 'ready' : ''}`}
+                onClick={() => {
+                  setPrepTab('image');
+                  setStagedTemplate(null);
+                  if (prepTab !== 'image') {
+                    // Only trigger file input if switching to image tab
+                    handleImageInputClick();
+                  }
+                }}
+                disabled={isUploadingImage}
+              >
+                {isUploadingImage ? 'Uploading…' : 'Send image'}
+              </button>
+            </div>
+
+            <input
+              ref={imageInputRef}
+              type="file"
+              accept="image/*"
+              onChange={handleImageUpload}
+              style={{ display: 'none' }}
+            />
+
+            {/* Templates tab content */}
+            {prepTab === 'templates' && (
+              <div className="template-selector">
+                <div className="template-buttons">
+                  <button
+                    type="button"
+                    className={`template-btn ${stagedTemplate?.type === 'hanzi' ? 'active' : ''}`}
+                    onClick={() => handleTemplateSelect('hanzi')}
+                  >
+                    Hanzi box
+                  </button>
+                  <button
+                    type="button"
+                    className={`template-btn ${stagedTemplate?.type === 'graph-corner' ? 'active' : ''}`}
+                    onClick={() => handleTemplateSelect('graph-corner')}
+                  >
+                    Graph (corner)
+                  </button>
+                  <button
+                    type="button"
+                    className={`template-btn ${stagedTemplate?.type === 'graph-cross' ? 'active' : ''}`}
+                    onClick={() => handleTemplateSelect('graph-cross')}
+                  >
+                    Graph (cross)
+                  </button>
+                </div>
+
+                {stagedTemplate && (
+                  <div className="template-preview">
+                    <img
+                      src={stagedTemplate.dataUrl}
+                      alt="Template preview"
+                      style={{
+                        maxWidth: '300px',
+                        maxHeight: '250px',
+                        border: '2px solid #0F9D83',
+                        borderRadius: '8px',
+                      }}
+                    />
+                    <p style={{ marginTop: '8px', color: '#999', fontSize: '14px' }}>
+                      Tiny preview (local only)
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Image tab content */}
+            {prepTab === 'image' && (
+              <>
+                {stagedImage ? (
+                  <div className="image-preview-surface">
+                    <img
+                      src={stagedImage.dataUrl}
+                      alt="Preview"
+                      className="image-preview-thumbnail"
+                    />
+                    <div className="preview-meta">
+                      <p className="preview-title">{stagedImage.filename || 'Prepared image'}</p>
+                      <p className="preview-subtitle">
+                        {stagedImage.width && stagedImage.height
+                          ? `${Math.round(stagedImage.width)} × ${Math.round(stagedImage.height)} px`
+                          : 'Ready to send'}
+                      </p>
+                      <div className="image-actions">
+                        <button className="ghost-btn" onClick={handleClearImage}>
+                          Clear
+                        </button>
+                      </div>
+                      {imageMessage && (
+                        <span className={`image-message ${isPositiveImageMessage ? 'success' : 'error'}`}>
+                          {imageMessage}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <button type="button" className="image-dropzone" onClick={handleImageInputClick}>
+                    <div className="dropzone-icon" aria-hidden="true">🖼️</div>
+                    <p>Bring an illustration or worksheet to share with the class.</p>
+                    <span>Click to upload an image</span>
+                    {imageMessage && (
+                      <span className={`image-message ${isPositiveImageMessage ? 'success' : 'error'}`}>
+                        {imageMessage}
+                      </span>
+                    )}
+                  </button>
+                )}
+              </>
+            )}
+
+            {/* Blank canvas tab - show nothing, just message */}
+            {prepTab === 'blank' && (
+              <div style={{ padding: '40px', textAlign: 'center', color: '#999' }}>
+                <p>Click "Send to class" to clear all students' canvases.</p>
+              </div>
+            )}
+          </div>
+        </section>
+
+        <section className="students-panel">
+          <div className="students-surface glass-panel">
+            {studentsList.length === 0 ? (
+              <div className="waiting-card">
+                <div className="waiting-icon" aria-hidden="true">👥</div>
+                <h2>Waiting for students to join…</h2>
+                <p>
+                  Share the <span className="inline-pill">session code</span> shown above. Students will appear here once they connect.
+                </p>
+              </div>
+            ) : filteredStudents.length === 0 ? (
+              <div className="no-results">
+                <div className="no-results-icon">🔍</div>
+                <h3>No students found</h3>
+                <p>No students match "{searchQuery}"</p>
+                <button className="clear-filter-btn" onClick={() => setSearchQuery('')}>
+                  Clear filter
+                </button>
+              </div>
+            ) : (
+              <div
+                className="students-grid"
+                style={{
+                  gridTemplateColumns: `repeat(${cardsPerRow}, 1fr)`
+                }}
+              >
+                {filteredStudents
+                  .filter(student => student && student.clientId)
+                  .map(student => (
+                    <StudentCard
+                      key={student.clientId}
+                      student={student}
+                      onClick={handleCardClick}
+                      onToggleFlag={toggleFlag}
+                      teacherAnnotations={teacherAnnotations[student.clientId] || []}
+                      sharedImage={sharedImage}
+                      hideNames={hideNames}
+                    />
+                  ))}
+              </div>
+            )}
+          </div>
+        </section>
       </div>
 
-      {/* Annotation Modal */}
       <AnnotationModal
         student={selectedStudentData}
         isOpen={!!selectedStudentData}
@@ -559,7 +844,6 @@ const TeacherDashboard = () => {
         sharedImage={sharedImage}
       />
 
-      {/* Instructions Footer */}
       <div className="dashboard-footer">
         <p>💡 <strong>Tip:</strong> Click on any student card to view their work and add annotations</p>
       </div>

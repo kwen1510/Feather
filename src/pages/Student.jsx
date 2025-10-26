@@ -199,6 +199,22 @@ function Student() {
           });
         });
 
+        // Listen for teacher templates
+        whiteboardChannel.subscribe('teacher-template', (message) => {
+          setSharedImage({
+            dataUrl: message.data?.dataUrl,
+            width: message.data?.width,
+            height: message.data?.height,
+            type: message.data?.type, // hanzi, graph-corner, graph-cross
+            timestamp: message.data?.timestamp,
+          });
+        });
+
+        // Listen for teacher clear command
+        whiteboardChannel.subscribe('teacher-clear', (message) => {
+          setSharedImage(null);
+        });
+
         // Enter presence with student name
         whiteboardChannel.presence.enter({ name: studentName });
         console.log(`Joined room ${roomId} as ${studentName}`);
