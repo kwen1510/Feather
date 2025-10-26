@@ -91,18 +91,23 @@ async function createStudent(studentId) {
 
     console.log(`👋 Student ${studentId} entered presence`);
 
-    // Draw ONE stroke
-    const singleStroke = generateRandomStroke();
-    await channel.publish('student-layer', {
-      lines: [singleStroke],
-    });
-    stats.totalMessagesSent++;
-    console.log(`✏️ Student ${studentId} drew one stroke`);
-
-    // Return cleanup function
+    // Return student object with drawing capability
     return {
       studentId,
+      clientId,
       ably,
+      channel,
+      lines: [], // Track cumulative strokes
+      drawStroke: async function() {
+        const newStroke = generateRandomStroke();
+        this.lines.push(newStroke);
+        await this.channel.publish('student-layer', {
+          lines: this.lines,
+          clientId: this.clientId,
+        });
+        stats.totalMessagesSent++;
+        console.log(`✏️ Student ${this.studentId} drew stroke ${this.lines.length} (total: ${this.lines.length})`);
+      },
       cleanup: () => {
         ably.close();
         stats.activeConnections--;
@@ -168,8 +173,46 @@ async function runLoadTest() {
 
   console.log(`\n✨ All ${students.length} students connected successfully!\n`);
   console.log(`📡 Students are connected and visible in teacher dashboard`);
-  console.log(`⏱️  Test will run for ${CONFIG.testDurationSeconds} seconds...`);
-  console.log(`\n💡 To disconnect all students, press Ctrl+C\n`);
+  console.log(`\n🎨 Starting drawing sequence: 3 strokes per student with 2s delays\n`);
+
+  // Helper function to draw in batches to avoid rate limit (50 msg/sec)
+  const drawInBatches = async (round) => {
+    const batchSize = 10; // Draw 10 students at a time
+    const delayBetweenBatches = 250; // 250ms between batches
+
+    for (let i = 0; i < students.length; i += batchSize) {
+      const batch = students.slice(i, i + batchSize);
+      await Promise.all(batch.map(student => student.drawStroke()));
+      if (i + batchSize < students.length) {
+        await new Promise(resolve => setTimeout(resolve, delayBetweenBatches));
+      }
+    }
+  };
+
+  // Round 1: Each student draws 1st stroke
+  console.log('📝 Round 1: Drawing first stroke...');
+  await drawInBatches(1);
+  console.log(`✅ All students drew stroke 1/3\n`);
+
+  // Wait 2 seconds
+  await new Promise(resolve => setTimeout(resolve, 2000));
+
+  // Round 2: Each student draws 2nd stroke
+  console.log('📝 Round 2: Drawing second stroke...');
+  await drawInBatches(2);
+  console.log(`✅ All students drew stroke 2/3\n`);
+
+  // Wait 2 seconds
+  await new Promise(resolve => setTimeout(resolve, 2000));
+
+  // Round 3: Each student draws 3rd stroke
+  console.log('📝 Round 3: Drawing third stroke...');
+  await drawInBatches(3);
+  console.log(`✅ All students drew stroke 3/3\n`);
+
+  console.log(`🎉 Drawing complete! Each student has 3 strokes (total: ${students.length * 3} strokes)\n`);
+  console.log(`⏱️  Students will stay connected for ${CONFIG.testDurationSeconds} seconds...`);
+  console.log(`💡 To disconnect all students, press Ctrl+C\n`);
 
   // Print stats periodically
   const statsInterval = setInterval(printStats, 5000);

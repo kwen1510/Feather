@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Smooth Pencil Canvas</title>
+<style>
+  html, body {
+    margin: 0; height: 100%; background: #111; overscroll-behavior: none;
+  }
+  #wrap {
+    position: fixed; inset: 0; display: grid; grid-template-rows: auto 1fr;
+  }
+  header {
+    padding: 10px 14px; color: #eee; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    display: flex; gap: 12px; align-items: center; background: #1b1b1b; border-bottom: 1px solid #2a2a2a;
+  }
+  header button {
+    font: inherit; padding: 8px 12px; border-radius: 10px; border: 1px solid #2a2a2a; background: #222; color: #eee;
+  }
+  header button:active { transform: translateY(1px); }
+  canvas { display: block; width: 100%; height: 100%; touch-action: none; background: #111; }
+</style>
+</head>
+<body>
+  <div id="wrap">
+    <header>
+      <strong>Apple Pencil Canvas</strong>
+      <button id="clearBtn">Clear</button>
+    </header>
+    <canvas id="c"></canvas>
+  </div>
+
+<script>
+(() => {
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d', { alpha: false, desynchronized: true });
+  const DPR = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
+  let points = [];
+  let drawing = false;
+  let rafId = null;
+
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.strokeStyle = '#f8f8f8';
+
+  function resize() {
+    const { width, height } = canvas.getBoundingClientRect();
+    canvas.width = Math.round(width * DPR);
+    canvas.height = Math.round(height * DPR);
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    ctx.fillStyle = '#111';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.strokeStyle = '#f8f8f8';
+  }
+  const ro = new ResizeObserver(resize);
+  ro.observe(canvas);
+
+  const mid = (p1, p2) => ({ x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 });
+
+  function addPoint(x, y) {
+    points.push({ x, y, p: 1 });
+  }
+
+  function drawSmooth() {
+    rafId = null;
+    if (points.length === 0) return;
+
+    const base = 2.2;
+
+    if (points.length === 1) {
+      const a = points[0];
+      ctx.beginPath();
+      ctx.lineWidth = base;
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(a.x + 0.01, a.y + 0.01);
+      ctx.stroke();
+      return;
+    }
+
+    ctx.beginPath();
+    let a = points[0];
+    ctx.moveTo(a.x, a.y);
+
+    for (let i = 1; i < points.length; i++) {
+      const b = points[i];
+      const m = mid(a, b);
+      ctx.lineWidth = base;
+      ctx.quadraticCurveTo(a.x, a.y, m.x, m.y);
+      a = b;
+    }
+    ctx.stroke();
+    points = points.slice(-2); // keep short memory for smoothness
+  }
+
+  function scheduleDraw() {
+    if (rafId == null) rafId = requestAnimationFrame(drawSmooth);
+  }
+
+  function pointerDown(e) {
+    if (e.pointerType !== 'pen' && e.pointerType !== 'mouse') return;
+    drawing = true;
+    canvas.setPointerCapture(e.pointerId);
+
+    // clear old stroke
+    points.length = 0;
+    ctx.beginPath();
+
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+
+    addPoint(x, y);
+    addPoint(x, y);
+    scheduleDraw();
+  }
+
+  function pointerMove(e) {
+    if (!drawing) return;
+    if (e.pointerType !== 'pen' && e.pointerType !== 'mouse') return;
+    const rect = canvas.getBoundingClientRect();
+    addPoint(e.clientX - rect.left, e.clientY - rect.top);
+    scheduleDraw();
+  }
+
+  function pointerUp(e) {
+    if (e.pointerType !== 'pen' && e.pointerType !== 'mouse') return;
+    drawing = false;
+    points.length = 0; // clear after stroke ends
+  }
+
+  function prevent(e) { e.preventDefault(); }
+
+  canvas.addEventListener('pointerdown', pointerDown, { passive: false });
+  canvas.addEventListener('pointermove', pointerMove, { passive: false });
+  window.addEventListener('pointerup', pointerUp, { passive: false });
+
+  canvas.addEventListener('touchstart', prevent, { passive: false });
+  canvas.addEventListener('touchmove', prevent, { passive: false });
+  canvas.addEventListener('gesturestart', prevent, { passive: false });
+
+  document.getElementById('clearBtn').addEventListener('click', () => {
+    ctx.fillStyle = '#111';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.strokeStyle = '#f8f8f8';
+    points = [];
+  });
+
+  function sizeToViewport() {
+    resize();
+  }
+  window.addEventListener('orientationchange', () => setTimeout(sizeToViewport, 100));
+  window.addEventListener('load', sizeToViewport);
+})();
+</script>
+</body>
+</html>

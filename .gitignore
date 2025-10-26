@@ -10,3 +10,4 @@
 
 # Local testing
 test/
+node_modules

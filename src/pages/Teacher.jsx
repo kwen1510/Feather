@@ -2,7 +2,12 @@ import React, { useEffect, useState, useRef } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import { Stage, Layer, Line } from 'react-konva';
 import * as Ably from 'ably';
+import { resizeAndCompressImage } from '../utils/imageUtils';
 import './Whiteboard.css';
+
+const BASE_CANVAS = { width: 800, height: 600 };
+const TEACHER_CONSOLE_PREFS_KEY = 'teacherConsolePrefs';
+const PREFS_VERSION = 2; // Increment when adding new preferences
 
 function Teacher() {
   const [searchParams] = useSearchParams();
@@ -16,6 +21,14 @@ function Teacher() {
   const [teacherLines, setTeacherLines] = useState([]);
   // Student lines (read-only)
   const [studentLines, setStudentLines] = useState([]);
+  const [sharedImage, setSharedImage] = useState(null);
+  const [stagedImage, setStagedImage] = useState(null); // Image in staging area before sending
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const [uploadError, setUploadError] = useState('');
+  const [studentCanvasMeta, setStudentCanvasMeta] = useState({
+    display: BASE_CANVAS,
+    scale: 1,
+  });
 
   // Drawing state
   const [tool, setTool] = useState('pen');
@@ -26,9 +39,55 @@ function Teacher() {
   // Undo/redo stacks
   const undoStack = useRef([]);
   const redoStack = useRef([]);
+  const isFirstRender = useRef(true);
+
+  // Load saved preferences
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    console.log('🟢 [TEACHER CONSOLE] Loading preferences from localStorage...');
+    try {
+      const stored = localStorage.getItem(TEACHER_CONSOLE_PREFS_KEY);
+      if (stored) {
+        const prefs = JSON.parse(stored);
+        console.log('🟢 [TEACHER CONSOLE] Found stored preferences:', prefs);
+        // Check version - if old version, clear and use defaults
+        if (prefs.version !== PREFS_VERSION) {
+          console.log('🟢 [TEACHER CONSOLE] Version mismatch! Expected:', PREFS_VERSION, 'Got:', prefs.version);
+          console.log('🟢 [TEACHER CONSOLE] Clearing old preferences...');
+          localStorage.removeItem(TEACHER_CONSOLE_PREFS_KEY);
+          return;
+        }
+        console.log('🟢 [TEACHER CONSOLE] Applying preferences...');
+        if (prefs.tool) setTool(prefs.tool);
+        if (prefs.color) setColor(prefs.color);
+        if (typeof prefs.brushSize === 'number') setBrushSize(prefs.brushSize);
+        console.log('🟢 [TEACHER CONSOLE] Preferences loaded successfully!');
+      } else {
+        console.log('🟢 [TEACHER CONSOLE] No stored preferences found, using defaults');
+      }
+    } catch (error) {
+      console.warn('🟢 [TEACHER CONSOLE] Failed to load teacher console prefs', error);
+      localStorage.removeItem(TEACHER_CONSOLE_PREFS_KEY);
+    }
+  }, []);
+
+  // Save preferences
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    // Skip saving on first render to avoid overwriting loaded preferences
+    if (isFirstRender.current) {
+      isFirstRender.current = false;
+      console.log('💾 [TEACHER CONSOLE] Skipping save on first render');
+      return;
+    }
+    const prefs = { version: PREFS_VERSION, tool, color, brushSize };
+    console.log('💾 [TEACHER CONSOLE] Saving preferences to localStorage:', prefs);
+    localStorage.setItem(TEACHER_CONSOLE_PREFS_KEY, JSON.stringify(prefs));
+  }, [tool, color, brushSize]);
 
   const isRemoteUpdate = useRef(false);
   const eraserStateSaved = useRef(false);
+  const fileInputRef = useRef(null);
 
   // Initialize Ably connection
   useEffect(() => {
@@ -57,6 +116,10 @@ function Teacher() {
           console.log('📦 Received', message.data.lines?.length || 0, 'student lines');
           isRemoteUpdate.current = true;
           setStudentLines(message.data.lines || []);
+          setStudentCanvasMeta({
+            display: message.data?.meta?.display || BASE_CANVAS,
+            scale: message.data?.meta?.scale || 1,
+          });
           setTimeout(() => {
             isRemoteUpdate.current = false;
           }, 100);
@@ -193,6 +256,71 @@ function Teacher() {
     }
   };
 
+  const displayWidth = studentCanvasMeta.display?.width || BASE_CANVAS.width;
+  const displayHeight = studentCanvasMeta.display?.height || BASE_CANVAS.height;
+  const aspectRatio = displayWidth / displayHeight;
+  const MAX_STAGE = { width: 1200, height: 820 };
+  let stageWidth = MAX_STAGE.width;
+  let stageHeight = stageWidth / aspectRatio;
+  if (stageHeight > MAX_STAGE.height) {
+    stageHeight = MAX_STAGE.height;
+    stageWidth = stageHeight * aspectRatio;
+  }
+  const studentWidthScale = stageWidth / BASE_CANVAS.width;
+  const studentHeightScale = stageHeight / BASE_CANVAS.height;
+
+  const scaleStudentPoints = (points = []) =>
+    points.map((value, index) =>
+      index % 2 === 0 ? value * studentWidthScale : value * studentHeightScale
+    );
+
+  const scaleStudentStroke = (line) => (line.strokeWidth || 3) * studentWidthScale;
+
+  const handleImageUpload = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setUploadError('');
+    setUploadingImage(true);
+
+    try {
+      const { dataUrl, width, height } = await resizeAndCompressImage(file);
+      const payload = {
+        dataUrl,
+        width,
+        height,
+        filename: file.name,
+        timestamp: Date.now(),
+      };
+      setStagedImage(payload);
+      console.log('Image staged for preview:', width, 'x', height);
+    } catch (error) {
+      console.error('Failed to process image upload:', error);
+      setUploadError('Unable to upload image. Please try a different file.');
+    } finally {
+      setUploadingImage(false);
+      event.target.value = '';
+    }
+  };
+
+  const handleSendImage = async () => {
+    if (!stagedImage || !channel) return;
+
+    try {
+      await channel.publish('teacher-image', stagedImage);
+      setSharedImage(stagedImage);
+      console.log('Image sent to all students');
+    } catch (error) {
+      console.error('Failed to send image:', error);
+      setUploadError('Failed to send image. Please try again.');
+    }
+  };
+
+  const handleClearStagedImage = () => {
+    setStagedImage(null);
+    setUploadError('');
+  };
+
   return (
     <div className="whiteboard teacher">
       <header className="header">
@@ -318,12 +446,78 @@ function Teacher() {
             {brushSize}px
           </span>
         </div>
+        <div className="tool-group">
+          <span style={{ marginRight: '10px', color: '#666', fontSize: '14px' }}>Share Image:</span>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            onChange={handleImageUpload}
+            style={{ display: 'none' }}
+          />
+          <button
+            className="btn"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploadingImage}
+          >
+            {uploadingImage ? 'Processing…' : 'Choose Photo'}
+          </button>
+          {uploadError && (
+            <span style={{ color: '#f44336', fontSize: '12px', marginLeft: '8px' }}>{uploadError}</span>
+          )}
+        </div>
       </div>
+
+      {stagedImage && (
+        <div className="image-staging-area" style={{
+          background: '#f5f5f5',
+          padding: '16px',
+          margin: '16px 32px',
+          borderRadius: '8px',
+          border: '2px solid #ddd',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '16px'
+        }}>
+          <img
+            src={stagedImage.dataUrl}
+            alt="Preview"
+            style={{
+              maxWidth: '200px',
+              maxHeight: '150px',
+              borderRadius: '4px',
+              border: '1px solid #ccc'
+            }}
+          />
+          <div style={{ flex: 1 }}>
+            <p style={{ margin: '0 0 8px 0', fontWeight: '600' }}>
+              Image ready to send ({stagedImage.width}×{stagedImage.height})
+            </p>
+            <p style={{ margin: '0', fontSize: '14px', color: '#666' }}>
+              {stagedImage.filename}
+            </p>
+          </div>
+          <button
+            className="btn"
+            onClick={handleSendImage}
+            style={{ background: '#4CAF50', color: 'white', fontWeight: '600' }}
+          >
+            Send to All Students
+          </button>
+          <button
+            className="btn"
+            onClick={handleClearStagedImage}
+            style={{ background: '#f44336', color: 'white' }}
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       <div className="canvas-container">
         <Stage
-          width={1200}
-          height={700}
+          width={stageWidth}
+          height={stageHeight}
           onMouseDown={handleMouseDown}
           onMousemove={handleMouseMove}
           onMouseup={handleMouseUp}
@@ -334,9 +528,9 @@ function Teacher() {
             {studentLines.map((line, i) => (
               <Line
                 key={`student-${i}`}
-                points={line.points}
+                points={scaleStudentPoints(line.points)}
                 stroke={line.color}
-                strokeWidth={line.strokeWidth}
+                strokeWidth={scaleStudentStroke(line)}
                 tension={0.5}
                 lineCap="round"
                 lineJoin="round"

@@ -1,36 +1,113 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { Stage, Layer, Line } from 'react-konva';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Stage, Layer, Line, Image as KonvaImage } from 'react-konva';
+import FlagIcon from './FlagIcon';
 import './AnnotationModal.css';
 
-/**
- * AnnotationModal - Full-screen view for annotating on a student's work
- * Implements same controls as original Teacher view: Pen, Eraser, Undo, Redo, Clear
- *
- * Props:
- * - student: { clientId, name, lines }
- * - isOpen: boolean
- * - onClose: Function to close modal
- * - onAnnotate: Function(annotations) - Called when teacher draws annotations
- * - existingAnnotations: Array of teacher's previous annotations for this student
- */
-const AnnotationModal = ({ student, isOpen, onClose, onAnnotate, existingAnnotations = [] }) => {
-  // Drawing state
+const BASE_CANVAS = { width: 800, height: 600 };
+const TEACHER_PREFS_KEY = 'teacherAnnotationPrefs';
+const PREFS_VERSION = 2; // Increment when adding new preferences
+const colorOptions = [
+  { label: 'Red', value: '#FF3B30' },
+  { label: 'Purple', value: '#7C3AED' },
+  { label: 'Teal', value: '#0EA5E9' },
+];
+
+const AnnotationModal = ({
+  student,
+  isOpen,
+  onClose,
+  onAnnotate,
+  existingAnnotations = [],
+  isFlagged = false,
+  onToggleFlag,
+  sharedImage,
+}) => {
   const [tool, setTool] = useState('pen');
-  const [color, setColor] = useState('#FF0000');
+  const [color, setColor] = useState(colorOptions[0].value);
   const [brushSize, setBrushSize] = useState(3);
   const [isDrawing, setIsDrawing] = useState(false);
   const [teacherAnnotations, setTeacherAnnotations] = useState([]);
-  const [inputMode, setInputMode] = useState('all'); // 'all' or 'stylus-only'
+  const [inputMode, setInputMode] = useState('stylus-only');
+  const [toolbarPosition, setToolbarPosition] = useState('left');
+  const [image, setImage] = useState(null);
 
-  // Undo/redo stacks
   const undoStack = useRef([]);
   const redoStack = useRef([]);
-
-  const stageRef = useRef(null);
   const eraserStateSaved = useRef(false);
   const prevStudentIdRef = useRef(null);
+  const isFirstRender = useRef(true);
 
-  // Initialize annotations when student changes or modal opens
+  // Load shared image
+  useEffect(() => {
+    if (!sharedImage) {
+      setImage(null);
+      return;
+    }
+
+    const img = new window.Image();
+    img.src = sharedImage.dataUrl;
+    img.onload = () => {
+      setImage(img);
+    };
+  }, [sharedImage]);
+
+  const canvasFrameRef = useRef(null);
+  const stageRef = useRef(null);
+  const [canvasSize, setCanvasSize] = useState({ width: 960, height: 720 });
+
+  const scales = useMemo(
+    () => ({
+      x: canvasSize.width / BASE_CANVAS.width,
+      y: canvasSize.height / BASE_CANVAS.height,
+    }),
+    [canvasSize]
+  );
+
+  // Load saved preferences
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    console.log('🟣 [TEACHER ANNOTATION] Loading preferences from localStorage...');
+    try {
+      const stored = localStorage.getItem(TEACHER_PREFS_KEY);
+      if (stored) {
+        const prefs = JSON.parse(stored);
+        console.log('🟣 [TEACHER ANNOTATION] Found stored preferences:', prefs);
+        // Check version - if old version, clear and use defaults
+        if (prefs.version !== PREFS_VERSION) {
+          console.log('🟣 [TEACHER ANNOTATION] Version mismatch! Expected:', PREFS_VERSION, 'Got:', prefs.version);
+          console.log('🟣 [TEACHER ANNOTATION] Clearing old preferences...');
+          localStorage.removeItem(TEACHER_PREFS_KEY);
+          return;
+        }
+        console.log('🟣 [TEACHER ANNOTATION] Applying preferences...');
+        if (prefs.tool) setTool(prefs.tool);
+        if (prefs.color) setColor(prefs.color);
+        if (typeof prefs.brushSize === 'number') setBrushSize(prefs.brushSize);
+        if (prefs.inputMode) setInputMode(prefs.inputMode);
+        if (prefs.toolbarPosition) setToolbarPosition(prefs.toolbarPosition);
+        console.log('🟣 [TEACHER ANNOTATION] Preferences loaded successfully!');
+      } else {
+        console.log('🟣 [TEACHER ANNOTATION] No stored preferences found, using defaults');
+      }
+    } catch (error) {
+      console.warn('🟣 [TEACHER ANNOTATION] Failed to load teacher annotation prefs', error);
+      localStorage.removeItem(TEACHER_PREFS_KEY);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    // Skip saving on first render to avoid overwriting loaded preferences
+    if (isFirstRender.current) {
+      isFirstRender.current = false;
+      console.log('💾 [TEACHER ANNOTATION] Skipping save on first render');
+      return;
+    }
+    const prefs = { version: PREFS_VERSION, tool, color, brushSize, inputMode, toolbarPosition };
+    console.log('💾 [TEACHER ANNOTATION] Saving preferences to localStorage:', prefs);
+    localStorage.setItem(TEACHER_PREFS_KEY, JSON.stringify(prefs));
+  }, [tool, color, brushSize, inputMode, toolbarPosition]);
+
   useEffect(() => {
     if (isOpen && student && student.clientId !== prevStudentIdRef.current) {
       prevStudentIdRef.current = student.clientId;
@@ -40,7 +117,61 @@ const AnnotationModal = ({ student, isOpen, onClose, onAnnotate, existingAnnotat
     }
   }, [isOpen, student, existingAnnotations]);
 
+  useEffect(() => {
+    if (!isOpen) return;
+    const resize = () => {
+      if (!canvasFrameRef.current) return;
+      const rect = canvasFrameRef.current.getBoundingClientRect();
+
+      // Account for padding (12px × 2 = 24px) + border (2px × 2 = 4px) = 28px total
+      const padding = 24;
+      const borderSize = 4;
+      const totalSpace = padding + borderSize;
+      const availableWidth = Math.max(320, rect.width - totalSpace);
+      const availableHeight = Math.max(240, rect.height - totalSpace);
+
+      // Use same scaling logic as Student.jsx to maintain exact 4:3 aspect ratio
+      const widthScale = availableWidth / BASE_CANVAS.width;
+      const heightScale = availableHeight / BASE_CANVAS.height;
+      const scale = Math.min(widthScale, heightScale);
+
+      setCanvasSize({
+        width: Math.round(BASE_CANVAS.width * scale),
+        height: Math.round(BASE_CANVAS.height * scale)
+      });
+    };
+    resize();
+    window.addEventListener('resize', resize);
+    return () => window.removeEventListener('resize', resize);
+  }, [toolbarPosition, isOpen]);
+
+  // Calculate image display position
+  const getImageLayout = () => {
+    if (!sharedImage || !image) return null;
+
+    const imageAspect = sharedImage.width / sharedImage.height;
+    const canvasAspect = canvasSize.width / canvasSize.height;
+
+    let displayWidth, displayHeight, x, y;
+
+    if (imageAspect > canvasAspect) {
+      displayWidth = canvasSize.width;
+      displayHeight = canvasSize.width / imageAspect;
+      x = 0;
+      y = (canvasSize.height - displayHeight) / 2;
+    } else {
+      displayHeight = canvasSize.height;
+      displayWidth = canvasSize.height * imageAspect;
+      x = (canvasSize.width - displayWidth) / 2;
+      y = 0;
+    }
+
+    return { x, y, width: displayWidth, height: displayHeight };
+  };
+
   if (!isOpen || !student) return null;
+
+  const imageLayout = getImageLayout();
 
   const getStudentName = () => {
     if (student.name) return student.name;
@@ -53,43 +184,34 @@ const AnnotationModal = ({ student, isOpen, onClose, onAnnotate, existingAnnotat
     return evt?.pointerType === 'pen';
   };
 
+  const projectPoints = (points = []) =>
+    points.map((value, index) => (index % 2 === 0 ? value * scales.x : value * scales.y));
+
+  const normalizePoint = (point) => ({ x: point.x / scales.x, y: point.y / scales.y });
+
+  const projectedStroke = (line) => (line.strokeWidth || 3) * scales.x;
+
   const handlePointerDown = (e) => {
     const evt = e.evt;
-
-    // Stylus-only mode: only accept pointerType === 'pen'
     if (!isAllowedPointerEvent(evt)) {
-      console.log('Blocked: Not a stylus (pointerType:', evt?.pointerType, ')');
-      if (evt?.preventDefault) {
-        evt.preventDefault();
-      }
+      if (evt?.preventDefault) evt.preventDefault();
       return;
     }
 
     if (tool === 'pen') {
       setIsDrawing(true);
       const pos = e.target.getStage().getPointerPosition();
-      const newLine = {
-        tool: 'pen',
-        points: [pos.x, pos.y],
-        color: color,
-        strokeWidth: brushSize,
-      };
-
-      // Save current state to undo stack
+      const { x, y } = normalizePoint(pos);
+      const newLine = { tool: 'pen', points: [x, y], color, strokeWidth: brushSize };
       undoStack.current.push([...teacherAnnotations]);
-      redoStack.current = []; // Clear redo stack on new action
-
+      redoStack.current = [];
       setTeacherAnnotations([...teacherAnnotations, newLine]);
     } else if (tool === 'eraser') {
-      // Eraser mode - state will be saved only when a line is actually erased
       setIsDrawing(true);
-      eraserStateSaved.current = false; // Reset flag for new erase session
+      eraserStateSaved.current = false;
     }
 
-    // Prevent default to avoid scrolling on touch devices
-    if (evt.preventDefault) {
-      evt.preventDefault();
-    }
+    if (evt.preventDefault) evt.preventDefault();
   };
 
   const handlePointerMove = (e) => {
@@ -97,9 +219,7 @@ const AnnotationModal = ({ student, isOpen, onClose, onAnnotate, existingAnnotat
 
     const evt = e.evt;
     if (!isAllowedPointerEvent(evt)) {
-      if (evt?.preventDefault) {
-        evt.preventDefault();
-      }
+      if (evt?.preventDefault) evt.preventDefault();
       return;
     }
 
@@ -109,28 +229,23 @@ const AnnotationModal = ({ student, isOpen, onClose, onAnnotate, existingAnnotat
     if (tool === 'pen') {
       const lastLine = teacherAnnotations[teacherAnnotations.length - 1];
       if (lastLine) {
-        lastLine.points = lastLine.points.concat([point.x, point.y]);
+        const { x, y } = normalizePoint(point);
+        lastLine.points = lastLine.points.concat([x, y]);
         setTeacherAnnotations([...teacherAnnotations.slice(0, -1), lastLine]);
       }
     } else if (tool === 'eraser') {
       const previousLength = teacherAnnotations.length;
-
-      // Check if pointer is near any line and remove it
-      const eraserRadius = 20; // Increased for smoother erasing
+      const eraserRadius = 20;
       const linesToKeep = teacherAnnotations.filter((line) => {
-        // Check if any point in the line is within eraser radius
         for (let i = 0; i < line.points.length; i += 2) {
-          const x = line.points[i];
-          const y = line.points[i + 1];
+          const x = line.points[i] * scales.x;
+          const y = line.points[i + 1] * scales.y;
           const distance = Math.sqrt(Math.pow(x - point.x, 2) + Math.pow(y - point.y, 2));
-          if (distance < eraserRadius) {
-            return false; // Remove this line
-          }
+          if (distance < eraserRadius) return false;
         }
-        return true; // Keep this line
+        return true;
       });
 
-      // Only save state to undo stack if we're actually erasing something and haven't saved yet
       if (linesToKeep.length < previousLength && !eraserStateSaved.current) {
         undoStack.current.push([...teacherAnnotations]);
         redoStack.current = [];
@@ -140,22 +255,16 @@ const AnnotationModal = ({ student, isOpen, onClose, onAnnotate, existingAnnotat
       setTeacherAnnotations(linesToKeep);
     }
 
-    // Prevent default to avoid scrolling on touch devices
-    if (evt?.preventDefault) {
-      evt.preventDefault();
-    }
+    if (evt?.preventDefault) evt.preventDefault();
   };
 
   const handlePointerUp = (e) => {
     const evt = e?.evt;
     if (!isAllowedPointerEvent(evt)) {
-      if (evt?.preventDefault) {
-        evt.preventDefault();
-      }
+      if (evt?.preventDefault) evt.preventDefault();
       return;
     }
     setIsDrawing(false);
-    // Publish after drawing/erasing is complete
     onAnnotate(teacherAnnotations);
   };
 
@@ -164,7 +273,6 @@ const AnnotationModal = ({ student, isOpen, onClose, onAnnotate, existingAnnotat
       const previousState = undoStack.current.pop();
       redoStack.current.push([...teacherAnnotations]);
       setTeacherAnnotations(previousState);
-      // Publish after undo
       onAnnotate(previousState);
     }
   };
@@ -174,7 +282,6 @@ const AnnotationModal = ({ student, isOpen, onClose, onAnnotate, existingAnnotat
       const nextState = redoStack.current.pop();
       undoStack.current.push([...teacherAnnotations]);
       setTeacherAnnotations(nextState);
-      // Publish after redo
       onAnnotate(nextState);
     }
   };
@@ -184,8 +291,11 @@ const AnnotationModal = ({ student, isOpen, onClose, onAnnotate, existingAnnotat
     redoStack.current = [];
     const emptyAnnotations = [];
     setTeacherAnnotations(emptyAnnotations);
-    // Publish after clear
     onAnnotate(emptyAnnotations);
+  };
+
+  const handleFlagToggle = () => {
+    if (onToggleFlag) onToggleFlag(student.clientId);
   };
 
   const handleClose = () => {
@@ -193,232 +303,184 @@ const AnnotationModal = ({ student, isOpen, onClose, onAnnotate, existingAnnotat
     onClose();
   };
 
+  // Removed click-outside-to-close functionality - only Close button can close modal
+
+  const toggleInputMode = () => {
+    setInputMode((prev) => (prev === 'stylus-only' ? 'all' : 'stylus-only'));
+  };
+
+  const toggleToolbarPosition = () => {
+    setToolbarPosition((prev) => (prev === 'left' ? 'right' : 'left'));
+  };
+
   return (
     <div className="annotation-modal-overlay">
-      <div className="annotation-modal">
-        {/* Header */}
-        <div className="annotation-modal-header">
-          <div className="student-info">
-            <span className="student-icon">👤</span>
-            <h2>{getStudentName()}</h2>
-            <span className="annotation-mode">Annotation Mode</span>
+      <div className="annotation-modal student-console">
+        <div className="annotation-console">
+          <div className="annotation-status-bar">
+            <div className="annotation-status-text">
+              <h1>Annotate Student</h1>
+              <p>{getStudentName()}</p>
+            </div>
+            <div className="annotation-status-actions">
+              <button className={`flag-pill ${isFlagged ? 'active' : ''}`} onClick={handleFlagToggle}>
+                <FlagIcon active={isFlagged} size={16} />
+                {isFlagged ? 'Flagged' : 'Flag'}
+              </button>
+              <button className="status-badge" onClick={toggleToolbarPosition}>
+                Move toolbar to {toolbarPosition === 'left' ? 'right' : 'left'}
+              </button>
+              <button className="status-badge danger" onClick={handleClose}>
+                ✕ Close
+              </button>
+            </div>
           </div>
 
-          <div className="header-actions">
-            <button className="close-btn" onClick={handleClose}>
-              ✕ Close
-            </button>
-          </div>
-        </div>
+          <div className={`annotation-workspace ${toolbarPosition === 'right' ? 'toolbar-right' : ''}`}>
+            <div className="annotation-sidebar">
+              <div className="sidebar-header">
+                <h2>Annotation Console</h2>
+                <p>Mirror of student workspace</p>
+              </div>
 
-        {/* Toolbar */}
-        <div className="annotation-toolbar">
-          <div className="tool-group">
-            <button
-              onClick={() => setTool('pen')}
-              className={`btn ${tool === 'pen' ? 'btn-active' : ''}`}
-            >
-              Pen
-            </button>
-            <button
-              onClick={() => setTool('eraser')}
-              className={`btn ${tool === 'eraser' ? 'btn-active' : ''}`}
-            >
-              Eraser
-            </button>
-            <button onClick={handleUndo} className="btn">Undo</button>
-            <button onClick={handleRedo} className="btn">Redo</button>
-            <button onClick={handleClear} className="btn btn-danger">Clear</button>
-          </div>
+              <div className="sidebar-section">
+                <h3 className="sidebar-label">COLORS</h3>
+                <div className="color-row">
+                  {colorOptions.map((option) => (
+                    <button
+                      key={option.value}
+                      className={`color-button ${color === option.value ? 'active' : ''}`}
+                      style={{ background: option.value }}
+                      onClick={() => setColor(option.value)}
+                      aria-label={option.label}
+                    />
+                  ))}
+                </div>
+              </div>
 
-          <div className="tool-group">
-            <span style={{ marginRight: '10px', color: '#666', fontSize: '14px' }}>Color:</span>
-            <button
-              onClick={() => setColor('#FF0000')}
-              className="color-btn"
-              style={{
-                background: '#FF0000',
-                width: '36px',
-                height: '36px',
-                borderRadius: '50%',
-                border: color === '#FF0000' ? '3px solid #333' : '2px solid #ddd',
-                cursor: 'pointer',
-                padding: 0
-              }}
-              title="Red"
-            />
-            <button
-              onClick={() => setColor('#0066FF')}
-              className="color-btn"
-              style={{
-                background: '#0066FF',
-                width: '36px',
-                height: '36px',
-                borderRadius: '50%',
-                border: color === '#0066FF' ? '3px solid #333' : '2px solid #ddd',
-                cursor: 'pointer',
-                padding: 0
-              }}
-              title="Blue"
-            />
-            <button
-              onClick={() => setColor('black')}
-              className="color-btn"
-              style={{
-                background: 'black',
-                width: '36px',
-                height: '36px',
-                borderRadius: '50%',
-                border: color === 'black' ? '3px solid #333' : '2px solid #ddd',
-                cursor: 'pointer',
-                padding: 0
-              }}
-              title="Black"
-            />
-            <button
-              onClick={() => setColor('#00AA00')}
-              className="color-btn"
-              style={{
-                background: '#00AA00',
-                width: '36px',
-                height: '36px',
-                borderRadius: '50%',
-                border: color === '#00AA00' ? '3px solid #333' : '2px solid #ddd',
-                cursor: 'pointer',
-                padding: 0
-              }}
-              title="Green"
-            />
-            <button
-              onClick={() => setColor('#FFD700')}
-              className="color-btn"
-              style={{
-                background: '#FFD700',
-                width: '36px',
-                height: '36px',
-                borderRadius: '50%',
-                border: color === '#FFD700' ? '3px solid #333' : '2px solid #ddd',
-                cursor: 'pointer',
-                padding: 0
-              }}
-              title="Yellow"
-            />
-            <button
-              onClick={() => setColor('#9933FF')}
-              className="color-btn"
-              style={{
-                background: '#9933FF',
-                width: '36px',
-                height: '36px',
-                borderRadius: '50%',
-                border: color === '#9933FF' ? '3px solid #333' : '2px solid #ddd',
-                cursor: 'pointer',
-                padding: 0
-              }}
-              title="Purple"
-            />
-          </div>
+              <div className="sidebar-section">
+                <h3 className="sidebar-label">TOOLS</h3>
+                <div className="tool-buttons">
+                  <button
+                    onClick={() => setTool('pen')}
+                    className={`tool-button ${tool === 'pen' ? 'active' : ''}`}
+                  >
+                    Pen
+                  </button>
+                  <button
+                    onClick={() => setTool('eraser')}
+                    className={`tool-button ${tool === 'eraser' ? 'active' : ''}`}
+                  >
+                    Eraser
+                  </button>
+                </div>
+              </div>
 
-          <div className="tool-group">
-            <span style={{ marginRight: '10px', color: '#666', fontSize: '14px' }}>Brush Size:</span>
-            <input
-              type="range"
-              min="1"
-              max="10"
-              value={brushSize}
-              onChange={(e) => setBrushSize(parseInt(e.target.value))}
-              style={{
-                width: '150px',
-                cursor: 'pointer'
-              }}
-            />
-            <span style={{ marginLeft: '10px', color: '#666', fontSize: '14px', minWidth: '30px' }}>
-              {brushSize}px
-            </span>
-          </div>
+              <div className="sidebar-section">
+                <h3 className="sidebar-label">BRUSH SIZE</h3>
+                <div className="brush-size-control">
+                  <input
+                    type="range"
+                    min="1"
+                    max="10"
+                    value={brushSize}
+                    onChange={(e) => setBrushSize(parseInt(e.target.value))}
+                    className="brush-slider"
+                  />
+                  <span className="brush-value">{brushSize}</span>
+                </div>
+              </div>
 
-          <div className="tool-group">
-            <span style={{ marginRight: '10px', color: '#666', fontSize: '14px' }}>Input Mode:</span>
-            <button
-              onClick={() => setInputMode('all')}
-              className={`btn ${inputMode === 'all' ? 'btn-active' : ''}`}
-            >
-              All Inputs
-            </button>
-            <button
-              onClick={() => setInputMode('stylus-only')}
-              className={`btn ${inputMode === 'stylus-only' ? 'btn-active' : ''}`}
-            >
-              Stylus Only
-            </button>
-          </div>
-        </div>
+              <div className="sidebar-section">
+                <h3 className="sidebar-label">INPUT MODE</h3>
+                <button
+                  className={`input-mode-toggle ${inputMode === 'all' ? 'all' : ''}`}
+                  onClick={toggleInputMode}
+                >
+                  {inputMode === 'stylus-only' ? 'Stylus only' : 'All inputs'}
+                </button>
+              </div>
 
-        {/* Canvas */}
-        <div className="annotation-canvas-container">
-          <Stage
-            ref={stageRef}
-            width={800}
-            height={600}
-            onPointerDown={handlePointerDown}
-            onPointerMove={handlePointerMove}
-            onPointerUp={handlePointerUp}
-            onPointerLeave={handlePointerUp}
-            style={{
-              border: '2px solid #ddd',
-              borderRadius: '8px',
-              background: 'white',
-              touchAction: 'none' // Prevent default touch behaviors like scrolling
-            }}
-          >
-            {/* Student's drawing (read-only, black) */}
-            <Layer listening={false}>
-              {student.lines && student.lines.map((line, i) => (
-                <Line
-                  key={`student-${i}`}
-                  points={line.points}
-                  stroke={line.color || 'black'}
-                  strokeWidth={line.strokeWidth || 3}
-                  tension={0.5}
-                  lineCap="round"
-                  lineJoin="round"
-                />
-              ))}
-            </Layer>
+              <div className="sidebar-section">
+                <h3 className="sidebar-label">HISTORY</h3>
+                <div className="history-buttons">
+                  <button
+                    onClick={handleUndo}
+                    className="history-button"
+                    disabled={undoStack.current.length === 0}
+                  >
+                    Undo
+                  </button>
+                  <button
+                    onClick={handleRedo}
+                    className="history-button"
+                    disabled={redoStack.current.length === 0}
+                  >
+                    Redo
+                  </button>
+                  <button onClick={handleClear} className="history-button danger">
+                    Clear
+                  </button>
+                </div>
+              </div>
+            </div>
 
-            {/* Teacher's annotations (red, editable) */}
-            <Layer>
-              {teacherAnnotations.map((line, i) => (
-                <Line
-                  key={`annotation-${i}`}
-                  points={line.points}
-                  stroke={line.color}
-                  strokeWidth={line.strokeWidth}
-                  tension={0.5}
-                  lineCap="round"
-                  lineJoin="round"
-                />
-              ))}
-            </Layer>
-          </Stage>
+            <div className="annotation-canvas-panel">
+              <div className="annotation-canvas-frame" ref={canvasFrameRef}>
+                <Stage
+                  ref={stageRef}
+                  width={canvasSize.width}
+                  height={canvasSize.height}
+                  onPointerDown={handlePointerDown}
+                  onPointerMove={handlePointerMove}
+                  onPointerUp={handlePointerUp}
+                  onPointerLeave={handlePointerUp}
+                  className="annotation-stage"
+                >
+                  {/* Shared image background layer */}
+                  {imageLayout && (
+                    <Layer listening={false}>
+                      <KonvaImage
+                        image={image}
+                        x={imageLayout.x}
+                        y={imageLayout.y}
+                        width={imageLayout.width}
+                        height={imageLayout.height}
+                      />
+                    </Layer>
+                  )}
 
-          {/* Instructions */}
-          <div className="annotation-instructions">
-            <p>🖊️ Draw in <span className="red-text">RED</span> to annotate on the student's work</p>
-            <p>👁️ Student's drawing shown in black (read-only)</p>
-            <p>📡 Your annotations sync to the student in real-time</p>
-          </div>
-        </div>
+                  {/* Student drawing layer */}
+                  <Layer listening={false}>
+                    {student.lines && student.lines.map((line, i) => (
+                      <Line
+                        key={`student-${i}`}
+                        points={projectPoints(line.points)}
+                        stroke={line.color || 'black'}
+                        strokeWidth={(line.strokeWidth || 3) * scales.x}
+                        tension={0.5}
+                        lineCap="round"
+                        lineJoin="round"
+                      />
+                    ))}
+                  </Layer>
 
-        {/* Footer Stats */}
-        <div className="annotation-modal-footer">
-          <div className="stat">
-            <span className="stat-label">Student Strokes:</span>
-            <span className="stat-value">{student.lines?.length || 0}</span>
-          </div>
-          <div className="stat">
-            <span className="stat-label">Your Annotations:</span>
-            <span className="stat-value red-text">{teacherAnnotations.length}</span>
+                  <Layer>
+                    {teacherAnnotations.map((line, i) => (
+                      <Line
+                        key={`annotation-${i}`}
+                        points={projectPoints(line.points)}
+                        stroke={line.color}
+                        strokeWidth={projectedStroke(line)}
+                        tension={0.5}
+                        lineCap="round"
+                        lineJoin="round"
+                      />
+                    ))}
+                  </Layer>
+                </Stage>
+              </div>
+            </div>
           </div>
         </div>
       </div>

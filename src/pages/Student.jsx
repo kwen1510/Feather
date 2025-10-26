@@ -1,21 +1,81 @@
-import React, { useEffect, useState, useRef } from 'react';
-import { useSearchParams, Link } from 'react-router-dom';
-import { Stage, Layer, Line } from 'react-konva';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import { Stage, Layer, Line, Image as KonvaImage } from 'react-konva';
 import * as Ably from 'ably';
 import './StudentNew.css';
+
+const BASE_CANVAS = { width: 800, height: 600 };
+const MIN_SCALE = 0.65;
+const MAX_SCALE = 2.2;
+const STUDENT_PREFS_KEY = 'studentCanvasPrefs';
+const PREFS_VERSION = 2; // Increment when adding new preferences
+
+// Component to display shared image as background
+const SharedImageLayer = ({ sharedImage, canvasWidth, canvasHeight }) => {
+  const [image, setImage] = useState(null);
+
+  useEffect(() => {
+    if (!sharedImage) {
+      setImage(null);
+      return;
+    }
+
+    const img = new window.Image();
+    img.src = sharedImage.dataUrl;
+    img.onload = () => {
+      setImage(img);
+    };
+  }, [sharedImage]);
+
+  if (!sharedImage || !image) return null;
+
+  // Calculate scaling to fit canvas while maintaining aspect ratio
+  // Longer side touches the edge
+  const imageAspect = sharedImage.width / sharedImage.height;
+  const canvasAspect = canvasWidth / canvasHeight;
+
+  let displayWidth, displayHeight, x, y;
+
+  if (imageAspect > canvasAspect) {
+    // Image is wider than canvas - fit to width
+    displayWidth = canvasWidth;
+    displayHeight = canvasWidth / imageAspect;
+    x = 0;
+    y = (canvasHeight - displayHeight) / 2;
+  } else {
+    // Image is taller than canvas - fit to height
+    displayHeight = canvasHeight;
+    displayWidth = canvasHeight * imageAspect;
+    x = (canvasWidth - displayWidth) / 2;
+    y = 0;
+  }
+
+  return (
+    <KonvaImage
+      image={image}
+      x={x}
+      y={y}
+      width={displayWidth}
+      height={displayHeight}
+      listening={false}
+    />
+  );
+};
 
 function Student() {
   const [searchParams] = useSearchParams();
   const roomId = searchParams.get('room') || 'demo';
+  const studentName = searchParams.get('name') || 'Anonymous';
 
   const [channel, setChannel] = useState(null);
   const [clientId] = useState(`student-${Math.random().toString(36).substr(2, 9)}`);
   const [isConnected, setIsConnected] = useState(false);
 
-  // Student lines (editable)
+  // Student lines (editable, stored in base 800x600 coordinates)
   const [studentLines, setStudentLines] = useState([]);
-  // Teacher lines (read-only)
+  // Teacher lines (read-only overlay, assumed base coordinates)
   const [teacherLines, setTeacherLines] = useState([]);
+  const [sharedImage, setSharedImage] = useState(null);
 
   // Drawing state
   const [tool, setTool] = useState('pen');
@@ -25,21 +85,70 @@ function Student() {
   const [inputMode, setInputMode] = useState('stylus-only'); // 'all' or 'stylus-only'
   const [toolbarPosition, setToolbarPosition] = useState('left'); // 'left' or 'right'
 
+  // Load saved preferences
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    console.log('🔵 [STUDENT] Loading preferences from localStorage...');
+    try {
+      const stored = localStorage.getItem(STUDENT_PREFS_KEY);
+      if (stored) {
+        const prefs = JSON.parse(stored);
+        console.log('🔵 [STUDENT] Found stored preferences:', prefs);
+        // Check version - if old version, clear and use defaults
+        if (prefs.version !== PREFS_VERSION) {
+          console.log('🔵 [STUDENT] Version mismatch! Expected:', PREFS_VERSION, 'Got:', prefs.version);
+          console.log('🔵 [STUDENT] Clearing old preferences...');
+          localStorage.removeItem(STUDENT_PREFS_KEY);
+          return;
+        }
+        console.log('🔵 [STUDENT] Applying preferences...');
+        if (prefs.tool) setTool(prefs.tool);
+        if (prefs.color) setColor(prefs.color);
+        if (typeof prefs.brushSize === 'number') setBrushSize(prefs.brushSize);
+        if (prefs.inputMode) setInputMode(prefs.inputMode);
+        if (prefs.toolbarPosition) setToolbarPosition(prefs.toolbarPosition);
+        console.log('🔵 [STUDENT] Preferences loaded successfully!');
+      } else {
+        console.log('🔵 [STUDENT] No stored preferences found, using defaults');
+      }
+    } catch (error) {
+      console.warn('🔵 [STUDENT] Failed to load student prefs', error);
+      localStorage.removeItem(STUDENT_PREFS_KEY);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    // Skip saving on first render to avoid overwriting loaded preferences
+    if (isFirstRender.current) {
+      isFirstRender.current = false;
+      console.log('💾 [STUDENT] Skipping save on first render');
+      return;
+    }
+    const prefs = { version: PREFS_VERSION, tool, color, brushSize, inputMode, toolbarPosition };
+    console.log('💾 [STUDENT] Saving preferences to localStorage:', prefs);
+    localStorage.setItem(STUDENT_PREFS_KEY, JSON.stringify(prefs));
+  }, [tool, color, brushSize, inputMode, toolbarPosition]);
+
   // Undo/redo stacks
   const undoStack = useRef([]);
   const redoStack = useRef([]);
+  const isFirstRender = useRef(true);
 
   const isRemoteUpdate = useRef(false);
   const eraserStateSaved = useRef(false);
 
   const canvasWrapperRef = useRef(null);
-  const [canvasDimensions, setCanvasDimensions] = useState({ width: 800, height: 600 });
+  const [canvasSize, setCanvasSize] = useState(BASE_CANVAS);
+  const canvasScale = useMemo(
+    () => (BASE_CANVAS.width ? canvasSize.width / BASE_CANVAS.width : 1),
+    [canvasSize.width]
+  );
 
   // Initialize Ably connection
   useEffect(() => {
     const initAbly = async () => {
       try {
-        // Use relative URL so it works on all devices (laptop, phone, tablet)
         const ably = new Ably.Realtime({
           authUrl: '/api/token',
           authParams: { clientId },
@@ -57,23 +166,21 @@ function Student() {
 
         const whiteboardChannel = ably.channels.get(`room-${roomId}`);
 
-        // Listen for student layer updates
+        // Listen for student layer updates (only react to own messages)
         whiteboardChannel.subscribe('student-layer', (message) => {
-          console.log('Received student layer update from', message.clientId);
           if (message.clientId !== clientId) {
-            isRemoteUpdate.current = true;
-            setStudentLines(message.data.lines || []);
-            setTimeout(() => {
-              isRemoteUpdate.current = false;
-            }, 100);
+            return; // Ignore strokes from other students
           }
+          isRemoteUpdate.current = true;
+          setStudentLines(message.data.lines || []);
+          setTimeout(() => {
+            isRemoteUpdate.current = false;
+          }, 100);
         });
 
         // Listen for teacher annotations and filter by targetStudentId
         whiteboardChannel.subscribe('teacher-annotation', (message) => {
-          // Only update if this annotation is for me
           if (message.data.targetStudentId === clientId) {
-            console.log('📥 Received teacher annotation from', message.data.teacherId, 'for me');
             isRemoteUpdate.current = true;
             setTeacherLines(message.data.annotations || []);
             setTimeout(() => {
@@ -81,6 +188,20 @@ function Student() {
             }, 100);
           }
         });
+
+        // Listen for teacher shared images
+        whiteboardChannel.subscribe('teacher-image', (message) => {
+          setSharedImage({
+            dataUrl: message.data?.dataUrl,
+            width: message.data?.width,
+            height: message.data?.height,
+            timestamp: message.data?.timestamp,
+          });
+        });
+
+        // Enter presence with student name
+        whiteboardChannel.presence.enter({ name: studentName });
+        console.log(`Joined room ${roomId} as ${studentName}`);
 
         setChannel(whiteboardChannel);
 
@@ -95,50 +216,64 @@ function Student() {
     initAbly();
   }, [clientId, roomId]);
 
-  // Dynamic canvas sizing
+  // Responsive canvas sizing (preserve 4:3 aspect)
   useEffect(() => {
+    const wrapper = canvasWrapperRef.current;
+    if (!wrapper) return;
+
     const updateCanvasSize = () => {
-      if (canvasWrapperRef.current) {
-        const wrapper = canvasWrapperRef.current;
-        const rect = wrapper.getBoundingClientRect();
+      if (!canvasWrapperRef.current) return;
+      const rect = canvasWrapperRef.current.getBoundingClientRect();
+      const padding = 48;
+      const availableWidth = Math.max(320, rect.width - padding);
+      const availableHeight = Math.max(240, rect.height - padding);
+      const widthScale = availableWidth / BASE_CANVAS.width;
+      const heightScale = availableHeight / BASE_CANVAS.height;
+      const rawScale = Math.min(widthScale, heightScale);
+      const clampedScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, rawScale));
+      const snappedScale = Math.round(clampedScale * 20) / 20; // increments of 0.05 for nice integers
 
-        // Account for padding (2rem = 32px on each side)
-        const padding = 64;
-        const maxWidth = rect.width - padding;
-        const maxHeight = rect.height - padding;
-
-        setCanvasDimensions({
-          width: Math.floor(maxWidth),
-          height: Math.floor(maxHeight)
-        });
-      }
+      setCanvasSize({
+        width: Math.round(BASE_CANVAS.width * snappedScale),
+        height: Math.round(BASE_CANVAS.height * snappedScale),
+      });
     };
 
-    // Initial size
     updateCanvasSize();
-
-    // Update on window resize
     window.addEventListener('resize', updateCanvasSize);
 
-    // Small delay to ensure layout is complete
-    const timer = setTimeout(updateCanvasSize, 100);
+    let resizeObserver;
+    if (window.ResizeObserver) {
+      resizeObserver = new ResizeObserver(() => updateCanvasSize());
+      resizeObserver.observe(wrapper);
+    }
 
     return () => {
       window.removeEventListener('resize', updateCanvasSize);
-      clearTimeout(timer);
+      if (resizeObserver) {
+        resizeObserver.disconnect();
+      }
     };
-  }, [toolbarPosition]); // Re-calculate when toolbar position changes
+  }, [toolbarPosition]);
 
   // Sync student lines to Ably
   useEffect(() => {
     if (!isRemoteUpdate.current && channel) {
       const timer = setTimeout(() => {
-        channel.publish('student-layer', { lines: studentLines, clientId });
+        channel.publish('student-layer', {
+          lines: studentLines,
+          clientId,
+          meta: {
+            base: BASE_CANVAS,
+            display: canvasSize,
+            scale: canvasScale,
+          },
+        });
         console.log('Published student layer:', studentLines.length, 'lines');
       }, 150);
       return () => clearTimeout(timer);
     }
-  }, [studentLines, channel, clientId]);
+  }, [studentLines, channel, clientId, canvasSize, canvasScale]);
 
   const isAllowedPointerEvent = (evt) => {
     if (inputMode !== 'stylus-only') return true;
@@ -148,9 +283,7 @@ function Student() {
   const handlePointerDown = (e) => {
     const evt = e.evt;
 
-    // Stylus-only mode: only accept pointerType === 'pen'
     if (!isAllowedPointerEvent(evt)) {
-      console.log('Blocked: Not a stylus (pointerType:', evt?.pointerType, ')');
       if (evt?.preventDefault) {
         evt.preventDefault();
       }
@@ -160,25 +293,24 @@ function Student() {
     if (tool === 'pen') {
       setIsDrawing(true);
       const pos = e.target.getStage().getPointerPosition();
+      const baseX = pos.x / canvasScale;
+      const baseY = pos.y / canvasScale;
       const newLine = {
         tool,
-        points: [pos.x, pos.y],
-        color: color,
-        strokeWidth: brushSize,
+        points: [baseX, baseY],
+        color,
+        strokeWidth: brushSize / canvasScale,
       };
 
-      // Save current state to undo stack
       undoStack.current.push([...studentLines]);
-      redoStack.current = []; // Clear redo stack on new action
+      redoStack.current = [];
 
       setStudentLines([...studentLines, newLine]);
     } else if (tool === 'eraser') {
-      // Eraser mode - state will be saved only when a line is actually erased
       setIsDrawing(true);
-      eraserStateSaved.current = false; // Reset flag for new erase session
+      eraserStateSaved.current = false;
     }
 
-    // Prevent default to avoid scrolling on touch devices
     if (evt.preventDefault) {
       evt.preventDefault();
     }
@@ -201,28 +333,32 @@ function Student() {
     if (tool === 'pen') {
       const lastLine = studentLines[studentLines.length - 1];
       if (lastLine) {
-        lastLine.points = lastLine.points.concat([point.x, point.y]);
-        setStudentLines([...studentLines.slice(0, -1), lastLine]);
+        const baseX = point.x / canvasScale;
+        const baseY = point.y / canvasScale;
+        const updatedLine = {
+          ...lastLine,
+          points: [...lastLine.points, baseX, baseY],
+        };
+        setStudentLines([...studentLines.slice(0, -1), updatedLine]);
       }
     } else if (tool === 'eraser') {
       const previousLength = studentLines.length;
+      const pointerX = point.x;
+      const pointerY = point.y;
+      const eraserRadius = 20;
 
-      // Check if pointer is near any line and remove it
-      const eraserRadius = 20; // Increased for smoother erasing
       const linesToKeep = studentLines.filter((line) => {
-        // Check if any point in the line is within eraser radius
         for (let i = 0; i < line.points.length; i += 2) {
-          const x = line.points[i];
-          const y = line.points[i + 1];
-          const distance = Math.sqrt(Math.pow(x - point.x, 2) + Math.pow(y - point.y, 2));
+          const x = line.points[i] * canvasScale;
+          const y = line.points[i + 1] * canvasScale;
+          const distance = Math.sqrt(Math.pow(x - pointerX, 2) + Math.pow(y - pointerY, 2));
           if (distance < eraserRadius) {
-            return false; // Remove this line
+            return false;
           }
         }
-        return true; // Keep this line
+        return true;
       });
 
-      // Only save state to undo stack if we're actually erasing something and haven't saved yet
       if (linesToKeep.length < previousLength && !eraserStateSaved.current) {
         undoStack.current.push([...studentLines]);
         redoStack.current = [];
@@ -232,7 +368,6 @@ function Student() {
       setStudentLines(linesToKeep);
     }
 
-    // Prevent default to avoid scrolling on touch devices
     if (evt?.preventDefault) {
       evt.preventDefault();
     }
@@ -271,111 +406,135 @@ function Student() {
     setStudentLines([]);
 
     if (channel) {
-      await channel.publish('student-layer', { lines: [], clientId });
+      await channel.publish('student-layer', {
+        lines: [],
+        clientId,
+        meta: {
+          base: BASE_CANVAS,
+          display: canvasSize,
+          scale: canvasScale,
+        },
+      });
       console.log('Published student clear');
     }
   };
 
   const getShortClientId = () => {
-    return clientId.split('-')[1]?.substring(0, 3) || 'kw';
+    return clientId.split('-')[1]?.substring(0, 3) || clientId;
   };
 
   const toggleInputMode = () => {
-    setInputMode(prev => prev === 'stylus-only' ? 'all' : 'stylus-only');
+    setInputMode((prev) => (prev === 'stylus-only' ? 'all' : 'stylus-only'));
   };
 
   const toggleToolbarPosition = () => {
-    setToolbarPosition(prev => prev === 'left' ? 'right' : 'left');
+    setToolbarPosition((prev) => (prev === 'left' ? 'right' : 'left'));
   };
+
+  const formatClientLabel = () => {
+    const displayName = studentName && studentName !== 'Anonymous' ? studentName : getShortClientId();
+    return `Connected as ${displayName}`;
+  };
+  const connectionLabel = isConnected ? 'Connected' : 'Reconnecting…';
+  const connectionStateClass = isConnected ? 'online' : 'offline';
+
+  const projectPointsForDisplay = (points) =>
+    points.map((value, idx) => value * canvasScale);
+
+  const projectStrokeWidth = (line) => (line.strokeWidth || 3) * canvasScale;
 
   return (
     <div className="student-canvas-page">
-      {/* Status Bar */}
-      <div className="student-status-bar">
-        <button
-          className="status-badge"
-          onClick={toggleInputMode}
-        >
-          <span className="status-dot"></span>
-          <span>{inputMode === 'stylus-only' ? 'Stylus mode (pen only)' : 'All inputs'}</span>
-        </button>
-        <button
-          className="move-toolbar-btn"
-          onClick={toggleToolbarPosition}
-        >
-          Move toolbar to {toolbarPosition === 'left' ? 'right' : 'left'}
-        </button>
-      </div>
-
-      <div className={`student-canvas-container ${toolbarPosition === 'right' ? 'toolbar-right' : ''}`}>
-        {/* Sidebar */}
-        <div className="student-sidebar">
-          {/* Header inside sidebar */}
-          <div className="sidebar-header">
-            <h1 className="student-title">Student Canvas</h1>
-            <p className="student-subtitle">Connected as {getShortClientId()}</p>
+      <div className="student-canvas-container">
+        <div className="student-status-bar">
+          <div className="student-status-text">
+            <h1>Student Canvas</h1>
+            <p>{formatClientLabel()}</p>
           </div>
-
-          {/* Colors */}
-          <div className="sidebar-section">
-            <h3 className="sidebar-label">COLORS</h3>
-            <div className="color-buttons">
-              <button
-                onClick={() => setColor('black')}
-                className={`color-button ${color === 'black' ? 'active' : ''}`}
-                style={{ background: 'black' }}
-                aria-label="Black"
-              />
-              <button
-                onClick={() => setColor('#0066FF')}
-                className={`color-button ${color === '#0066FF' ? 'active' : ''}`}
-                style={{ background: '#0066FF' }}
-                aria-label="Blue"
-              />
-              <button
-                onClick={() => setColor('#00AA00')}
-                className={`color-button ${color === '#00AA00' ? 'active' : ''}`}
-                style={{ background: '#00AA00' }}
-                aria-label="Green"
-              />
+          <div className="student-status-actions">
+            <div className={`connection-pill ${connectionStateClass}`} aria-live="polite">
+              <span className="connection-indicator-dot" />
+              <span>{connectionLabel}</span>
             </div>
+            <button className="move-toolbar-btn" onClick={toggleToolbarPosition}>
+              Move toolbar to {toolbarPosition === 'left' ? 'right' : 'left'}
+            </button>
           </div>
+        </div>
 
-          {/* Tools */}
-          <div className="sidebar-section">
-            <h3 className="sidebar-label">TOOLS</h3>
-            <div className="tool-buttons">
-              <button
-                onClick={() => setTool('pen')}
-                className={`tool-button ${tool === 'pen' ? 'active' : ''}`}
-              >
-                Pen
-              </button>
-              <button
-                onClick={() => setTool('eraser')}
-                className={`tool-button ${tool === 'eraser' ? 'active' : ''}`}
-              >
-                Eraser
-              </button>
-            </div>
-          </div>
-
-          {/* Brush Size */}
-          <div className="sidebar-section">
-            <h3 className="sidebar-label">BRUSH SIZE</h3>
-            <div className="brush-size-control">
-              <div className="brush-slider-container">
-                <input
-                  type="range"
-                  min="1"
-                  max="10"
-                  value={brushSize}
-                  onChange={(e) => setBrushSize(parseInt(e.target.value))}
-                  className="brush-slider"
+        <div className={`student-workspace ${toolbarPosition === 'right' ? 'toolbar-right' : ''}`}>
+          {/* Sidebar */}
+          <div className="student-sidebar">
+            {/* Colors */}
+            <div className="sidebar-section">
+              <h3 className="sidebar-label">COLORS</h3>
+              <div className="color-buttons">
+                <button
+                  onClick={() => setColor('black')}
+                  className={`color-button ${color === 'black' ? 'active' : ''}`}
+                  style={{ background: 'black' }}
+                  aria-label="Black"
                 />
-                <span className="brush-value">{brushSize}</span>
+                <button
+                  onClick={() => setColor('#0066FF')}
+                  className={`color-button ${color === '#0066FF' ? 'active' : ''}`}
+                  style={{ background: '#0066FF' }}
+                  aria-label="Blue"
+                />
+                <button
+                  onClick={() => setColor('#00AA00')}
+                  className={`color-button ${color === '#00AA00' ? 'active' : ''}`}
+                  style={{ background: '#00AA00' }}
+                  aria-label="Green"
+                />
               </div>
             </div>
+
+            {/* Tools */}
+            <div className="sidebar-section">
+              <h3 className="sidebar-label">TOOLS</h3>
+              <div className="tool-buttons">
+                <button
+                  onClick={() => setTool('pen')}
+                  className={`tool-button ${tool === 'pen' ? 'active' : ''}`}
+                >
+                  Pen
+                </button>
+                <button
+                  onClick={() => setTool('eraser')}
+                  className={`tool-button ${tool === 'eraser' ? 'active' : ''}`}
+                >
+                  Eraser
+                </button>
+              </div>
+            </div>
+
+            {/* Brush Size */}
+            <div className="sidebar-section">
+              <h3 className="sidebar-label">BRUSH SIZE</h3>
+              <div className="brush-size-control">
+                <div className="brush-slider-container">
+                  <input
+                    type="range"
+                    min="1"
+                    max="10"
+                    value={brushSize}
+                    onChange={(e) => setBrushSize(parseInt(e.target.value))}
+                    className="brush-slider"
+                  />
+                  <span className="brush-value">{brushSize}</span>
+                </div>
+              </div>
+            </div>
+          {/* Input Mode */}
+          <div className="sidebar-section">
+            <h3 className="sidebar-label">INPUT MODE</h3>
+            <button
+              className={`input-mode-toggle ${inputMode === 'all' ? 'all-inputs' : ''}`}
+              onClick={toggleInputMode}
+            >
+              {inputMode === 'stylus-only' ? 'Stylus mode (pen only)' : 'All inputs'}
+            </button>
           </div>
 
           {/* History */}
@@ -396,58 +555,72 @@ function Student() {
               >
                 Redo
               </button>
-              <button
-                onClick={handleClear}
-                className="history-button danger"
-              >
+              <button onClick={handleClear} className="history-button danger">
                 Clear
               </button>
             </div>
           </div>
-        </div>
+          </div>
 
-        {/* Canvas */}
-        <div className="student-canvas-wrapper" ref={canvasWrapperRef}>
-          <Stage
-            width={canvasDimensions.width}
-            height={canvasDimensions.height}
-            onPointerDown={handlePointerDown}
-            onPointerMove={handlePointerMove}
-            onPointerUp={handlePointerUp}
-            onPointerLeave={handlePointerUp}
-            className="canvas-stage"
-            style={{ touchAction: 'none' }}
-          >
-            {/* Student layer (editable) */}
-            <Layer>
-              {studentLines.map((line, i) => (
-                <Line
-                  key={`student-${i}`}
-                  points={line.points}
-                  stroke={line.color}
-                  strokeWidth={line.strokeWidth}
-                  tension={0.5}
-                  lineCap="round"
-                  lineJoin="round"
-                />
-              ))}
-            </Layer>
+          {/* Canvas */}
+          <div className="student-canvas-panel" ref={canvasWrapperRef}>
+            <div className="student-canvas-frame">
+              <div
+                className="student-canvas-surface"
+                style={{ width: `${canvasSize.width}px`, height: `${canvasSize.height}px` }}
+              >
+                <Stage
+                  width={canvasSize.width}
+                  height={canvasSize.height}
+                  onPointerDown={handlePointerDown}
+                  onPointerMove={handlePointerMove}
+                  onPointerUp={handlePointerUp}
+                  onPointerLeave={handlePointerUp}
+                  className="canvas-stage"
+                  style={{ touchAction: 'none' }}
+                  >
+                    {/* Shared image layer (background) */}
+                    <Layer listening={false}>
+                      <SharedImageLayer
+                        sharedImage={sharedImage}
+                        canvasWidth={canvasSize.width}
+                        canvasHeight={canvasSize.height}
+                      />
+                    </Layer>
 
-            {/* Teacher layer (read-only overlay) */}
-            <Layer listening={false}>
-              {teacherLines.map((line, i) => (
-                <Line
-                  key={`teacher-${i}`}
-                  points={line.points}
-                  stroke={line.color}
-                  strokeWidth={line.strokeWidth}
-                  tension={0.5}
-                  lineCap="round"
-                  lineJoin="round"
-                />
-              ))}
-            </Layer>
-          </Stage>
+                    {/* Student layer (editable) */}
+                    <Layer>
+                      {studentLines.map((line, i) => (
+                        <Line
+                        key={`student-${i}`}
+                        points={projectPointsForDisplay(line.points)}
+                        stroke={line.color}
+                        strokeWidth={projectStrokeWidth(line)}
+                        tension={0.5}
+                        lineCap="round"
+                        lineJoin="round"
+                      />
+                    ))}
+                  </Layer>
+
+                  {/* Teacher layer (read-only overlay) */}
+                  <Layer listening={false}>
+                    {teacherLines.map((line, i) => (
+                      <Line
+                        key={`teacher-${i}`}
+                        points={projectPointsForDisplay(line.points)}
+                        stroke={line.color}
+                        strokeWidth={projectStrokeWidth(line)}
+                        tension={0.5}
+                        lineCap="round"
+                        lineJoin="round"
+                      />
+                    ))}
+                  </Layer>
+                </Stage>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
