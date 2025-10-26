@@ -329,27 +329,26 @@ const AnnotationModal = ({
     // Flush any pending animation frame to ensure final points are saved
     if (animationFrameRef.current) {
       cancelAnimationFrame(animationFrameRef.current);
-
-      // Apply the final update immediately and sync
-      if (currentLineRef.current) {
-        const finalLine = currentLineRef.current;
-        setTeacherAnnotations(prev => {
-          if (prev.length === 0) return prev;
-          const updated = [...prev.slice(0, -1), finalLine];
-          // Call onAnnotate with the updated state
-          requestAnimationFrame(() => onAnnotate(updated));
-          return updated;
-        });
-      }
-
       animationFrameRef.current = null;
-    } else {
-      // No pending frame, just call onAnnotate with current state
-      onAnnotate(teacherAnnotations);
     }
 
-    // Clear current line ref
-    currentLineRef.current = null;
+    // Ensure the final line is properly saved with all points
+    if (currentLineRef.current && tool === 'pen') {
+      const finalLine = currentLineRef.current;
+      setTeacherAnnotations(prev => {
+        if (prev.length === 0) return prev;
+        // Replace the last line (which we added in handlePointerDown) with the final version
+        const updated = [...prev.slice(0, -1), finalLine];
+        // Sync to server after state update
+        setTimeout(() => onAnnotate(updated), 0);
+        return updated;
+      });
+      // Clear current line ref
+      currentLineRef.current = null;
+    } else {
+      // No current line ref (eraser mode or something else), just sync current state
+      setTimeout(() => onAnnotate(teacherAnnotations), 0);
+    }
   };
 
   const handleUndo = () => {
