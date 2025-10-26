@@ -192,6 +192,56 @@
   color: white;
 }
 
+/* Icon-based tool buttons */
+.tool-icon-buttons {
+  flex-direction: row;
+  gap: 0.75rem;
+  justify-content: center;
+}
+
+.tool-icon-button {
+  width: 48px;
+  height: 48px;
+  padding: 0;
+  border-radius: 12px;
+  border: 2px solid rgba(148, 163, 184, 0.3);
+  background: white;
+  color: #475569;
+  font-size: 24px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tool-icon-button:hover {
+  transform: translateY(-2px);
+  border-color: #0f9d83;
+  box-shadow: 0 4px 12px rgba(15, 157, 131, 0.2);
+}
+
+.tool-icon-button.active {
+  background: linear-gradient(135deg, #0f9d83, #0d6f5c);
+  border-color: #0d9c76;
+  box-shadow: 0 8px 20px rgba(15, 118, 110, 0.4);
+  transform: scale(1.05);
+}
+
+/* Tool status indicator in top bar */
+.tool-status-indicator {
+  padding: 8px 16px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.12);
+  margin-right: 12px;
+}
+
+.tool-status-text {
+  font-size: 13px;
+  font-weight: 500;
+  color: #64748b;
+  white-space: nowrap;
+}
 
 .brush-size-control {
   display: flex;

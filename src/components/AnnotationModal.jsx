@@ -416,6 +416,11 @@ const AnnotationModal = ({
               <p>{getStudentName()}</p>
             </div>
             <div className="annotation-status-actions">
+              <div className="tool-status-indicator">
+                <span className="tool-status-text">
+                  {tool === 'pen' ? '✏️' : '🧹'} {inputMode === 'all' ? 'All inputs' : 'Stylus only'}
+                </span>
+              </div>
               <button className={`flag-pill ${isFlagged ? 'active' : ''}`} onClick={handleFlagToggle}>
                 <FlagIcon active={isFlagged} size={16} />
                 {isFlagged ? 'Flagged' : 'Flag'}
@@ -453,18 +458,20 @@ const AnnotationModal = ({
 
               <div className="sidebar-section">
                 <h3 className="sidebar-label">TOOLS</h3>
-                <div className="tool-buttons">
+                <div className="tool-buttons tool-icon-buttons">
                   <button
                     onClick={() => setTool('pen')}
-                    className={`tool-button ${tool === 'pen' ? 'active' : ''}`}
+                    className={`tool-icon-button ${tool === 'pen' ? 'active' : ''}`}
+                    title="Pen"
                   >
-                    Pen
+                    ✏️
                   </button>
                   <button
                     onClick={() => setTool('eraser')}
-                    className={`tool-button ${tool === 'eraser' ? 'active' : ''}`}
+                    className={`tool-icon-button ${tool === 'eraser' ? 'active' : ''}`}
+                    title="Eraser"
                   >
-                    Eraser
+                    🧹
                   </button>
                 </div>
               </div>
