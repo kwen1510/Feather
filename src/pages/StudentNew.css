@@ -234,15 +234,15 @@
 
 /* Icon-based tool buttons */
 .tool-icon-buttons {
-  flex-direction: row;
-  gap: 0.75rem;
-  justify-content: center;
+  flex-direction: column;
+  gap: 0.65rem;
+  justify-content: flex-start;
 }
 
 .tool-icon-button {
-  width: 48px;
-  height: 48px;
-  padding: 0;
+  width: 100%;
+  height: 52px;
+  padding: 0 1rem;
   border-radius: 12px;
   border: 2px solid rgba(148, 163, 184, 0.3);
   background: white;
@@ -252,7 +252,8 @@
   transition: all 0.2s ease;
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
+  gap: 0.75rem;
 }
 
 .tool-icon-button:hover {
@@ -265,7 +266,22 @@
   background: linear-gradient(135deg, #0f9d83, #0d6f5c);
   border-color: #0d9c76;
   box-shadow: 0 8px 20px rgba(15, 118, 110, 0.4);
-  transform: scale(1.05);
+  transform: translateY(-1px);
+}
+
+.tool-icon-button.active .tool-label {
+  color: white;
+}
+
+.tool-icon {
+  font-size: 24px;
+  line-height: 1;
+}
+
+.tool-label {
+  font-size: 15px;
+  font-weight: 600;
+  color: #475569;
 }
 
 /* Tool status indicator in top bar */
