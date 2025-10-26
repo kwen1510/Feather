@@ -647,3 +647,153 @@
     padding: 32px 16px;
   }
 }
+
+/* QR Code Modal */
+.qr-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+  animation: fadeIn 0.2s ease;
+}
+
+.qr-modal {
+  background: white;
+  border-radius: 20px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  width: min(500px, 90vw);
+  max-height: 90vh;
+  overflow: auto;
+  animation: slideUp 0.3s ease;
+}
+
+.qr-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 24px 28px;
+  border-bottom: 2px solid #e5e7eb;
+}
+
+.qr-modal-header h2 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.qr-close-btn {
+  background: none;
+  border: none;
+  font-size: 28px;
+  cursor: pointer;
+  color: #64748b;
+  padding: 4px 8px;
+  line-height: 1;
+  transition: color 0.2s;
+}
+
+.qr-close-btn:hover {
+  color: #0f172a;
+}
+
+.qr-modal-content {
+  padding: 32px 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  align-items: center;
+}
+
+.qr-code-container {
+  background: white;
+  padding: 20px;
+  border-radius: 16px;
+  border: 2px solid #e5e7eb;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.qr-code-image {
+  display: block;
+  width: 300px;
+  height: 300px;
+}
+
+.qr-instructions {
+  width: 100%;
+  text-align: center;
+}
+
+.qr-instruction-text {
+  margin: 0 0 16px;
+  color: #475569;
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+.qr-link-box {
+  display: flex;
+  gap: 8px;
+  padding: 12px;
+  background: #f8fafc;
+  border: 2px solid #e2e8f0;
+  border-radius: 12px;
+}
+
+.qr-link-input {
+  flex: 1;
+  padding: 10px 14px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  font-size: 14px;
+  font-family: 'Monaco', 'Courier New', monospace;
+  color: #1e293b;
+  background: white;
+}
+
+.qr-copy-btn {
+  padding: 10px 20px;
+  background: #0F9D83;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.qr-copy-btn:hover {
+  background: #0d8570;
+  box-shadow: 0 4px 12px rgba(15, 157, 131, 0.3);
+}
+
+@media (max-width: 640px) {
+  .qr-modal {
+    width: 95vw;
+  }
+
+  .qr-modal-content {
+    padding: 24px 16px;
+  }
+
+  .qr-code-image {
+    width: 250px;
+    height: 250px;
+  }
+
+  .qr-link-box {
+    flex-direction: column;
+  }
+
+  .qr-copy-btn {
+    width: 100%;
+  }
+}

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import Ably from 'ably/promises';
+import QRCode from 'qrcode';
 import StudentCard from '../components/StudentCard';
 import AnnotationModal from '../components/AnnotationModal';
 import { resizeAndCompressImage } from '../utils/imageUtils';
@@ -82,6 +83,8 @@ const TeacherDashboard = () => {
   const [isUploadingImage, setIsUploadingImage] = useState(false);
   const [sharedImage, setSharedImage] = useState(null); // Shared image sent to all students
   const imageInputRef = useRef(null);
+  const [showQRModal, setShowQRModal] = useState(false);
+  const [qrCodeDataUrl, setQrCodeDataUrl] = useState('');
 
   const isRemoteUpdate = useRef(false);
 
@@ -491,6 +494,36 @@ const TeacherDashboard = () => {
     navigate('/');
   };
 
+  // Handle QR code modal
+  const handleShowQRModal = async () => {
+    const studentUrl = `${window.location.origin}/student?room=${roomId}`;
+    try {
+      const qrDataUrl = await QRCode.toDataURL(studentUrl, {
+        width: 300,
+        margin: 2,
+        color: {
+          dark: '#0F172A',
+          light: '#FFFFFF',
+        },
+      });
+      setQrCodeDataUrl(qrDataUrl);
+      setShowQRModal(true);
+    } catch (error) {
+      console.error('Failed to generate QR code:', error);
+    }
+  };
+
+  const handleCopyLink = async () => {
+    const studentUrl = `${window.location.origin}/student?room=${roomId}`;
+    try {
+      await navigator.clipboard.writeText(studentUrl);
+      alert('Link copied to clipboard!');
+    } catch (error) {
+      console.error('Failed to copy link:', error);
+      alert('Failed to copy link. Please copy manually.');
+    }
+  };
+
   // Get student array sorted by most recent activity
   const getStudentsList = () => {
     return Object.values(students).sort((a, b) => {
@@ -547,7 +580,7 @@ const TeacherDashboard = () => {
               </p>
             </div>
             <div className="session-info">
-              <div className="session-code-pill">
+              <div className="session-code-pill clickable" onClick={handleShowQRModal} style={{ cursor: 'pointer' }}>
                 <span className="pill-label">Session code</span>
                 <span className="pill-value">{roomId}</span>
               </div>
@@ -667,10 +700,6 @@ const TeacherDashboard = () => {
                 onClick={() => {
                   setPrepTab('image');
                   setStagedTemplate(null);
-                  if (prepTab !== 'image') {
-                    // Only trigger file input if switching to image tab
-                    handleImageInputClick();
-                  }
                 }}
                 disabled={isUploadingImage}
               >
@@ -751,6 +780,9 @@ const TeacherDashboard = () => {
                           : 'Ready to send'}
                       </p>
                       <div className="image-actions">
+                        <button className="ghost-btn" onClick={handleImageInputClick}>
+                          Choose another
+                        </button>
                         <button className="ghost-btn" onClick={handleClearImage}>
                           Clear
                         </button>
@@ -847,6 +879,43 @@ const TeacherDashboard = () => {
       <div className="dashboard-footer">
         <p>💡 <strong>Tip:</strong> Click on any student card to view their work and add annotations</p>
       </div>
+
+      {/* QR Code Modal */}
+      {showQRModal && (
+        <div className="qr-modal-overlay" onClick={() => setShowQRModal(false)}>
+          <div className="qr-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="qr-modal-header">
+              <h2>Join Session: {roomId}</h2>
+              <button className="qr-close-btn" onClick={() => setShowQRModal(false)}>
+                ✕
+              </button>
+            </div>
+            <div className="qr-modal-content">
+              <div className="qr-code-container">
+                {qrCodeDataUrl && (
+                  <img src={qrCodeDataUrl} alt="QR Code" className="qr-code-image" />
+                )}
+              </div>
+              <div className="qr-instructions">
+                <p className="qr-instruction-text">
+                  <strong>Students can scan this QR code</strong> or use the link below to join the session
+                </p>
+                <div className="qr-link-box">
+                  <input
+                    type="text"
+                    value={`${window.location.origin}/student?room=${roomId}`}
+                    readOnly
+                    className="qr-link-input"
+                  />
+                  <button className="qr-copy-btn" onClick={handleCopyLink}>
+                    Copy Link
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
