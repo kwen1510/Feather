@@ -276,14 +276,22 @@ const AnnotationModal = ({
         const { x, y } = normalizePoint(point);
         currentLineRef.current.points = currentLineRef.current.points.concat([x, y]);
 
+        // Capture the current line in a local variable to avoid null reference
+        const lineToUpdate = currentLineRef.current;
+
         // Use requestAnimationFrame to batch updates and avoid excessive re-renders
         if (animationFrameRef.current) {
           cancelAnimationFrame(animationFrameRef.current);
         }
 
         animationFrameRef.current = requestAnimationFrame(() => {
-          // Force a single re-render with updated line
-          setTeacherAnnotations(prev => [...prev.slice(0, -1), currentLineRef.current]);
+          // Force a single re-render with updated line (use captured value for safety)
+          if (lineToUpdate) {
+            setTeacherAnnotations(prev => {
+              if (prev.length === 0) return prev;
+              return [...prev.slice(0, -1), lineToUpdate];
+            });
+          }
         });
       }
     } else if (tool === 'eraser') {
@@ -318,16 +326,30 @@ const AnnotationModal = ({
 
     setIsDrawing(false);
 
-    // Cancel any pending animation frames
+    // Flush any pending animation frame to ensure final points are saved
     if (animationFrameRef.current) {
       cancelAnimationFrame(animationFrameRef.current);
+
+      // Apply the final update immediately and sync
+      if (currentLineRef.current) {
+        const finalLine = currentLineRef.current;
+        setTeacherAnnotations(prev => {
+          if (prev.length === 0) return prev;
+          const updated = [...prev.slice(0, -1), finalLine];
+          // Call onAnnotate with the updated state
+          requestAnimationFrame(() => onAnnotate(updated));
+          return updated;
+        });
+      }
+
       animationFrameRef.current = null;
+    } else {
+      // No pending frame, just call onAnnotate with current state
+      onAnnotate(teacherAnnotations);
     }
 
     // Clear current line ref
     currentLineRef.current = null;
-
-    onAnnotate(teacherAnnotations);
   };
 
   const handleUndo = () => {
