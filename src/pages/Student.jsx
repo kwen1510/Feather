@@ -215,6 +215,17 @@ function Student() {
           setSharedImage(null);
         });
 
+        // Listen for clear all drawings command (when teacher sends new content)
+        whiteboardChannel.subscribe('clear-all-drawings', (message) => {
+          console.log('📝 Clearing all drawings (teacher sent new content)');
+          isRemoteUpdate.current = true;
+          setStudentLines([]); // Clear student's own drawings
+          setTeacherLines([]); // Clear teacher annotations
+          setTimeout(() => {
+            isRemoteUpdate.current = false;
+          }, 100);
+        });
+
         // Enter presence with student name
         whiteboardChannel.presence.enter({ name: studentName });
         console.log(`Joined room ${roomId} as ${studentName}`);

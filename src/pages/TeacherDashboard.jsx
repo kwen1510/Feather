@@ -463,6 +463,22 @@ const TeacherDashboard = () => {
     if (!channel) return;
 
     try {
+      // Clear all student drawings and teacher annotations first
+      await channel.publish('clear-all-drawings', { timestamp: Date.now() });
+
+      // Clear local state
+      setStudents(prev => {
+        const updated = {};
+        Object.keys(prev).forEach(key => {
+          updated[key] = {
+            ...prev[key],
+            lines: [], // Clear student lines
+          };
+        });
+        return updated;
+      });
+      setTeacherAnnotations({}); // Clear all teacher annotations
+
       if (prepTab === 'blank') {
         // Clear any existing template/image
         await channel.publish('teacher-clear', { timestamp: Date.now() });
