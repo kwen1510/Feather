@@ -481,7 +481,7 @@ function Student() {
           <div className="student-status-actions">
             <div className="tool-status-indicator">
               <span className="tool-status-text">
-                {tool === 'pen' ? '🖊️' : '🧽'} {inputMode === 'all' ? 'All inputs' : 'Stylus only'}
+                <i className={tool === 'pen' ? 'pi pi-pencil' : 'pi pi-eraser'}></i> {inputMode === 'all' ? 'All inputs' : 'Stylus only'}
               </span>
             </div>
             <div className={`connection-pill ${connectionStateClass}`} aria-live="polite">
@@ -531,7 +531,7 @@ function Student() {
                   className={`tool-icon-button ${tool === 'pen' ? 'active' : ''}`}
                   title="Pen"
                 >
-                  <span className="tool-icon">🖊️</span>
+                  <i className="pi pi-pencil tool-icon"></i>
                   <span className="tool-label">Pen</span>
                 </button>
                 <button
@@ -539,7 +539,7 @@ function Student() {
                   className={`tool-icon-button ${tool === 'eraser' ? 'active' : ''}`}
                   title="Eraser"
                 >
-                  <span className="tool-icon">🧽</span>
+                  <i className="pi pi-eraser tool-icon"></i>
                   <span className="tool-label">Eraser</span>
                 </button>
               </div>
