@@ -37,6 +37,10 @@ const AnnotationModal = ({
   const prevStudentIdRef = useRef(null);
   const isFirstRender = useRef(true);
 
+  // Performance optimization: keep current line in ref to avoid re-renders
+  const currentLineRef = useRef(null);
+  const animationFrameRef = useRef(null);
+
   // Load shared image
   useEffect(() => {
     if (!sharedImage) {
@@ -117,6 +121,38 @@ const AnnotationModal = ({
     }
   }, [isOpen, student, existingAnnotations]);
 
+  // Cleanup animation frame on unmount
+  useEffect(() => {
+    return () => {
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+      }
+    };
+  }, []);
+
+  // Prevent body scrolling when modal is open
+  useEffect(() => {
+    if (isOpen) {
+      // Save original body overflow
+      const originalOverflow = document.body.style.overflow;
+      const originalPosition = document.body.style.position;
+      const originalTouchAction = document.body.style.touchAction;
+
+      // Prevent scrolling
+      document.body.style.overflow = 'hidden';
+      document.body.style.position = 'fixed';
+      document.body.style.width = '100%';
+      document.body.style.touchAction = 'none';
+
+      return () => {
+        // Restore original styles
+        document.body.style.overflow = originalOverflow;
+        document.body.style.position = originalPosition;
+        document.body.style.touchAction = originalTouchAction;
+      };
+    }
+  }, [isOpen]);
+
   useEffect(() => {
     if (!isOpen) return;
     const resize = () => {
@@ -193,8 +229,12 @@ const AnnotationModal = ({
 
   const handlePointerDown = (e) => {
     const evt = e.evt;
+
+    // Prevent default and stop propagation to avoid scrolling
+    if (evt?.preventDefault) evt.preventDefault();
+    if (evt?.stopPropagation) evt.stopPropagation();
+
     if (!isAllowedPointerEvent(evt)) {
-      if (evt?.preventDefault) evt.preventDefault();
       return;
     }
 
@@ -205,21 +245,25 @@ const AnnotationModal = ({
       const newLine = { tool: 'pen', points: [x, y], color, strokeWidth: brushSize };
       undoStack.current.push([...teacherAnnotations]);
       redoStack.current = [];
+
+      // Store reference to current line for performance
+      currentLineRef.current = newLine;
       setTeacherAnnotations([...teacherAnnotations, newLine]);
     } else if (tool === 'eraser') {
       setIsDrawing(true);
       eraserStateSaved.current = false;
     }
-
-    if (evt.preventDefault) evt.preventDefault();
   };
 
   const handlePointerMove = (e) => {
+    // Prevent default and stop propagation first
+    const evt = e.evt;
+    if (evt?.preventDefault) evt.preventDefault();
+    if (evt?.stopPropagation) evt.stopPropagation();
+
     if (!isDrawing) return;
 
-    const evt = e.evt;
     if (!isAllowedPointerEvent(evt)) {
-      if (evt?.preventDefault) evt.preventDefault();
       return;
     }
 
@@ -227,11 +271,20 @@ const AnnotationModal = ({
     const point = stage.getPointerPosition();
 
     if (tool === 'pen') {
-      const lastLine = teacherAnnotations[teacherAnnotations.length - 1];
-      if (lastLine) {
+      // Performance optimization: directly mutate points array in ref
+      if (currentLineRef.current) {
         const { x, y } = normalizePoint(point);
-        lastLine.points = lastLine.points.concat([x, y]);
-        setTeacherAnnotations([...teacherAnnotations.slice(0, -1), lastLine]);
+        currentLineRef.current.points = currentLineRef.current.points.concat([x, y]);
+
+        // Use requestAnimationFrame to batch updates and avoid excessive re-renders
+        if (animationFrameRef.current) {
+          cancelAnimationFrame(animationFrameRef.current);
+        }
+
+        animationFrameRef.current = requestAnimationFrame(() => {
+          // Force a single re-render with updated line
+          setTeacherAnnotations(prev => [...prev.slice(0, -1), currentLineRef.current]);
+        });
       }
     } else if (tool === 'eraser') {
       const previousLength = teacherAnnotations.length;
@@ -254,8 +307,6 @@ const AnnotationModal = ({
 
       setTeacherAnnotations(linesToKeep);
     }
-
-    if (evt?.preventDefault) evt.preventDefault();
   };
 
   const handlePointerUp = (e) => {
@@ -264,7 +315,18 @@ const AnnotationModal = ({
       if (evt?.preventDefault) evt.preventDefault();
       return;
     }
+
     setIsDrawing(false);
+
+    // Cancel any pending animation frames
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current);
+      animationFrameRef.current = null;
+    }
+
+    // Clear current line ref
+    currentLineRef.current = null;
+
     onAnnotate(teacherAnnotations);
   };
 
@@ -313,8 +375,18 @@ const AnnotationModal = ({
     setToolbarPosition((prev) => (prev === 'left' ? 'right' : 'left'));
   };
 
+  // Prevent all touch/pointer events from reaching the overlay/body
+  const handleOverlayTouchMove = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
   return (
-    <div className="annotation-modal-overlay">
+    <div
+      className="annotation-modal-overlay"
+      onTouchMove={handleOverlayTouchMove}
+      onTouchStart={handleOverlayTouchMove}
+    >
       <div className="annotation-modal student-console">
         <div className="annotation-console">
           <div className="annotation-status-bar">
@@ -426,7 +498,12 @@ const AnnotationModal = ({
             </div>
 
             <div className="annotation-canvas-panel">
-              <div className="annotation-canvas-frame" ref={canvasFrameRef}>
+              <div
+                className="annotation-canvas-frame"
+                ref={canvasFrameRef}
+                onTouchMove={(e) => e.preventDefault()}
+                onTouchStart={(e) => e.preventDefault()}
+              >
                 <Stage
                   ref={stageRef}
                   width={canvasSize.width}
@@ -435,6 +512,8 @@ const AnnotationModal = ({
                   onPointerMove={handlePointerMove}
                   onPointerUp={handlePointerUp}
                   onPointerLeave={handlePointerUp}
+                  onTouchMove={(e) => e.preventDefault()}
+                  onTouchStart={(e) => e.preventDefault()}
                   className="annotation-stage"
                 >
                   {/* Shared image background layer */}

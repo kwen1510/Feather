@@ -7,6 +7,9 @@
   justify-content: center;
   z-index: 1000;
   padding: 2rem;
+  overflow: hidden;
+  touch-action: none;
+  -webkit-overflow-scrolling: auto;
 }
 
 .annotation-modal {
@@ -16,6 +19,7 @@
   border-radius: 2rem;
   box-shadow: 0 25px 80px rgba(15, 118, 110, 0.25);
   overflow: hidden;
+  touch-action: none;
 }
 
 .annotation-console {
@@ -266,6 +270,10 @@
   min-height: 0;
   box-sizing: border-box;
   padding: 12px;
+  overflow: hidden;
+  touch-action: none;
+  -webkit-overflow-scrolling: auto;
+  overscroll-behavior: contain;
 }
 
 .annotation-stage {
@@ -273,6 +281,9 @@
   background: white;
   border: 2px solid #e3efe8;
   box-sizing: border-box;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 @media (max-width: 900px) {
