@@ -112,6 +112,7 @@ const AnnotationModal = ({
     localStorage.setItem(TEACHER_PREFS_KEY, JSON.stringify(prefs));
   }, [tool, color, brushSize, inputMode, toolbarPosition]);
 
+  // Sync annotations when switching between students
   useEffect(() => {
     if (isOpen && student && student.clientId !== prevStudentIdRef.current) {
       prevStudentIdRef.current = student.clientId;
@@ -120,6 +121,13 @@ const AnnotationModal = ({
       redoStack.current = [];
     }
   }, [isOpen, student, existingAnnotations]);
+
+  // Update annotations when existingAnnotations changes (e.g., when clearing all)
+  useEffect(() => {
+    if (isOpen && student) {
+      setTeacherAnnotations(existingAnnotations);
+    }
+  }, [existingAnnotations, isOpen, student]);
 
   // Cleanup animation frame on unmount
   useEffect(() => {
