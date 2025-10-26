@@ -418,7 +418,7 @@ const AnnotationModal = ({
             <div className="annotation-status-actions">
               <div className="tool-status-indicator">
                 <span className="tool-status-text">
-                  {tool === 'pen' ? '✏️' : '🧹'} {inputMode === 'all' ? 'All inputs' : 'Stylus only'}
+                  {tool === 'pen' ? '🖊️' : '🧽'} {inputMode === 'all' ? 'All inputs' : 'Stylus only'}
                 </span>
               </div>
               <button className={`flag-pill ${isFlagged ? 'active' : ''}`} onClick={handleFlagToggle}>
@@ -464,7 +464,7 @@ const AnnotationModal = ({
                     className={`tool-icon-button ${tool === 'pen' ? 'active' : ''}`}
                     title="Pen"
                   >
-                    <span className="tool-icon">✏️</span>
+                    <span className="tool-icon">🖊️</span>
                     <span className="tool-label">Pen</span>
                   </button>
                   <button
@@ -472,7 +472,7 @@ const AnnotationModal = ({
                     className={`tool-icon-button ${tool === 'eraser' ? 'active' : ''}`}
                     title="Eraser"
                   >
-                    <span className="tool-icon">🧹</span>
+                    <span className="tool-icon">🧽</span>
                     <span className="tool-label">Eraser</span>
                   </button>
                 </div>
