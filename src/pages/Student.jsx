@@ -152,6 +152,7 @@ function Student() {
   }, []);
 
   const canvasWrapperRef = useRef(null);
+  const stageRef = useRef(null);
   const [canvasSize, setCanvasSize] = useState(BASE_CANVAS);
   const canvasScale = useMemo(
     () => (BASE_CANVAS.width ? canvasSize.width / BASE_CANVAS.width : 1),
@@ -330,9 +331,22 @@ function Student() {
       return;
     }
 
+    // Capture pointer for smooth tracking
+    const stage = e.target.getStage();
+    if (stage && evt.pointerId !== undefined) {
+      const canvas = stage.content;
+      if (canvas && canvas.setPointerCapture) {
+        try {
+          canvas.setPointerCapture(evt.pointerId);
+        } catch (err) {
+          // Ignore if pointer capture fails
+        }
+      }
+    }
+
     if (tool === 'pen') {
       setIsDrawing(true);
-      const pos = e.target.getStage().getPointerPosition();
+      const pos = stage.getPointerPosition();
       const baseX = pos.x / canvasScale;
       const baseY = pos.y / canvasScale;
       const newLine = {
@@ -647,6 +661,7 @@ function Student() {
                 style={{ width: `${canvasSize.width}px`, height: `${canvasSize.height}px` }}
               >
                 <Stage
+                  ref={stageRef}
                   width={canvasSize.width}
                   height={canvasSize.height}
                   onPointerDown={handlePointerDown}
@@ -655,6 +670,7 @@ function Student() {
                   onPointerLeave={handlePointerUp}
                   className="canvas-stage"
                   style={{ touchAction: 'none' }}
+                  perfectDrawEnabled={false}
                   >
                     {/* Shared image layer (background) */}
                     <Layer listening={false}>

@@ -246,9 +246,22 @@ const AnnotationModal = ({
       return;
     }
 
+    // Capture pointer for smooth tracking
+    const stage = e.target.getStage();
+    if (stage && evt.pointerId !== undefined) {
+      const canvas = stage.content;
+      if (canvas && canvas.setPointerCapture) {
+        try {
+          canvas.setPointerCapture(evt.pointerId);
+        } catch (err) {
+          // Ignore if pointer capture fails
+        }
+      }
+    }
+
     if (tool === 'pen') {
       setIsDrawing(true);
-      const pos = e.target.getStage().getPointerPosition();
+      const pos = stage.getPointerPosition();
       const { x, y } = normalizePoint(pos);
       const newLine = { tool: 'pen', points: [x, y], color, strokeWidth: brushSize };
       undoStack.current.push([...teacherAnnotations]);
@@ -553,6 +566,7 @@ const AnnotationModal = ({
                   onTouchMove={(e) => e.preventDefault()}
                   onTouchStart={(e) => e.preventDefault()}
                   className="annotation-stage"
+                  perfectDrawEnabled={false}
                 >
                   {/* Shared image background layer */}
                   {imageLayout && (
