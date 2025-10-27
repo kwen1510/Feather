@@ -151,10 +151,19 @@ function Student() {
     };
   }, []);
 
-  // Prevent touch events and text selection globally
+  // Prevent touch events and text selection ONLY on canvas area
   useEffect(() => {
+    const canvasWrapper = canvasWrapperRef.current;
+    if (!canvasWrapper) return;
+
     const preventTouch = (e) => {
-      e.preventDefault();
+      // Only prevent if the touch is on the canvas area, not on buttons
+      const target = e.target;
+      const isButton = target.closest('button') || target.closest('.student-toolbar') || target.closest('.student-topbar');
+
+      if (!isButton) {
+        e.preventDefault();
+      }
     };
 
     const preventGesture = (e) => {
@@ -169,18 +178,20 @@ function Student() {
       }
     };
 
-    // Add passive: false to allow preventDefault
-    document.addEventListener('touchstart', preventTouch, { passive: false });
-    document.addEventListener('touchmove', preventTouch, { passive: false });
-    document.addEventListener('gesturestart', preventGesture, { passive: false });
-    document.addEventListener('gesturechange', preventGesture, { passive: false });
+    // Add listeners to canvas wrapper only, not entire document
+    canvasWrapper.addEventListener('touchstart', preventTouch, { passive: false });
+    canvasWrapper.addEventListener('touchmove', preventTouch, { passive: false });
+    canvasWrapper.addEventListener('gesturestart', preventGesture, { passive: false });
+    canvasWrapper.addEventListener('gesturechange', preventGesture, { passive: false });
     document.addEventListener('selectstart', preventSelection);
 
     return () => {
-      document.removeEventListener('touchstart', preventTouch);
-      document.removeEventListener('touchmove', preventTouch);
-      document.removeEventListener('gesturestart', preventGesture);
-      document.removeEventListener('gesturechange', preventGesture);
+      if (canvasWrapper) {
+        canvasWrapper.removeEventListener('touchstart', preventTouch);
+        canvasWrapper.removeEventListener('touchmove', preventTouch);
+        canvasWrapper.removeEventListener('gesturestart', preventGesture);
+        canvasWrapper.removeEventListener('gesturechange', preventGesture);
+      }
       document.removeEventListener('selectstart', preventSelection);
     };
   }, [isDrawing]);

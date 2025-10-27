@@ -152,9 +152,18 @@ const AnnotationModal = ({
       document.body.style.width = '100%';
       document.body.style.touchAction = 'none';
 
-      // Prevent touch events and gestures globally
+      const canvasFrame = canvasFrameRef.current;
+      if (!canvasFrame) return;
+
+      // Prevent touch events and gestures ONLY on canvas area, not buttons
       const preventTouch = (e) => {
-        e.preventDefault();
+        // Only prevent if the touch is on the canvas area, not on buttons/sidebar
+        const target = e.target;
+        const isButton = target.closest('button') || target.closest('.annotation-sidebar') || target.closest('.annotation-status-actions');
+
+        if (!isButton) {
+          e.preventDefault();
+        }
       };
 
       const preventGesture = (e) => {
@@ -168,10 +177,11 @@ const AnnotationModal = ({
         }
       };
 
-      document.addEventListener('touchstart', preventTouch, { passive: false });
-      document.addEventListener('touchmove', preventTouch, { passive: false });
-      document.addEventListener('gesturestart', preventGesture, { passive: false });
-      document.addEventListener('gesturechange', preventGesture, { passive: false });
+      // Add listeners to canvas frame only, not entire document
+      canvasFrame.addEventListener('touchstart', preventTouch, { passive: false });
+      canvasFrame.addEventListener('touchmove', preventTouch, { passive: false });
+      canvasFrame.addEventListener('gesturestart', preventGesture, { passive: false });
+      canvasFrame.addEventListener('gesturechange', preventGesture, { passive: false });
       document.addEventListener('selectstart', preventSelection);
 
       return () => {
@@ -181,10 +191,12 @@ const AnnotationModal = ({
         document.body.style.touchAction = originalTouchAction;
 
         // Remove event listeners
-        document.removeEventListener('touchstart', preventTouch);
-        document.removeEventListener('touchmove', preventTouch);
-        document.removeEventListener('gesturestart', preventGesture);
-        document.removeEventListener('gesturechange', preventGesture);
+        if (canvasFrame) {
+          canvasFrame.removeEventListener('touchstart', preventTouch);
+          canvasFrame.removeEventListener('touchmove', preventTouch);
+          canvasFrame.removeEventListener('gesturestart', preventGesture);
+          canvasFrame.removeEventListener('gesturechange', preventGesture);
+        }
         document.removeEventListener('selectstart', preventSelection);
       };
     }
