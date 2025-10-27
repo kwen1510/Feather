@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import { Stage, Layer, Line, Image as KonvaImage } from 'react-konva';
 import * as Ably from 'ably';
 import { supabase } from '../supabaseClient';
@@ -65,8 +65,9 @@ const SharedImageLayer = ({ sharedImage, canvasWidth, canvasHeight }) => {
 
 function Student() {
   const [searchParams] = useSearchParams();
-  const roomId = searchParams.get('room') || 'demo';
-  const studentName = searchParams.get('name') || 'Anonymous';
+  const navigate = useNavigate();
+  const roomId = searchParams.get('room');
+  const studentName = searchParams.get('name');
 
   const [channel, setChannel] = useState(null);
   const [clientId] = useState(`student-${Math.random().toString(36).substr(2, 9)}`);
@@ -91,6 +92,13 @@ function Student() {
   const [isDrawing, setIsDrawing] = useState(false);
   const [inputMode, setInputMode] = useState('stylus-only'); // 'all' or 'stylus-only'
   const [toolbarPosition, setToolbarPosition] = useState('left'); // 'left' or 'right'
+
+  // Redirect to login if missing name or room
+  useEffect(() => {
+    if (!roomId || !studentName) {
+      navigate(`/student-login${roomId ? `?room=${roomId}` : ''}`);
+    }
+  }, [roomId, studentName, navigate]);
 
   // Load saved preferences
   useEffect(() => {
@@ -717,6 +725,11 @@ function Student() {
     points.map((value, idx) => value * canvasScale);
 
   const projectStrokeWidth = (line) => (line.strokeWidth || 3) * canvasScale;
+
+  // Don't render anything if redirecting to login
+  if (!roomId || !studentName) {
+    return null;
+  }
 
   return (
     <div className="student-canvas-page">

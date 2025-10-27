@@ -1,0 +1,141 @@
+.student-login-page {
+  min-height: 100vh;
+  width: 100%;
+  background: linear-gradient(125deg, #d6f6e9 0%, #e6f7f2 45%, #f4fbff 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+  font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  box-sizing: border-box;
+}
+
+.student-login-card {
+  background: white;
+  border-radius: 1.5rem;
+  padding: 3rem 2.5rem;
+  max-width: 450px;
+  width: 100%;
+  box-shadow: 0 25px 60px rgba(15, 118, 110, 0.2);
+  animation: fadeInUp 0.4s ease-out;
+}
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.student-login-card h1 {
+  margin: 0 0 0.5rem;
+  font-size: 1.75rem;
+  font-weight: 700;
+  color: #0f1828;
+  text-align: center;
+}
+
+.login-subtitle {
+  margin: 0 0 2rem;
+  color: #64748b;
+  font-size: 0.95rem;
+  text-align: center;
+  line-height: 1.5;
+}
+
+.form-group {
+  margin-bottom: 1.5rem;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 0.5rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #374151;
+}
+
+.form-group input {
+  width: 100%;
+  padding: 0.875rem 1rem;
+  border: 2px solid #e5e7eb;
+  border-radius: 0.75rem;
+  font-size: 1rem;
+  font-family: inherit;
+  color: #1f2937;
+  background: white;
+  transition: all 0.2s ease;
+  box-sizing: border-box;
+}
+
+.form-group input:focus {
+  outline: none;
+  border-color: #0f9d83;
+  box-shadow: 0 0 0 4px rgba(15, 157, 131, 0.1);
+}
+
+.form-group input::placeholder {
+  color: #9ca3af;
+  text-transform: uppercase;
+  font-size: 0.85rem;
+  letter-spacing: 0.05em;
+}
+
+.login-error {
+  margin-bottom: 1rem;
+  padding: 0.75rem 1rem;
+  background: #fee2e2;
+  color: #c53030;
+  border-radius: 0.5rem;
+  font-size: 0.9rem;
+  font-weight: 500;
+  text-align: center;
+}
+
+.join-button {
+  width: 100%;
+  padding: 1rem;
+  background: linear-gradient(135deg, #0f9d83, #0d8a72);
+  color: white;
+  border: none;
+  border-radius: 0.75rem;
+  font-size: 1rem;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 4px 12px rgba(15, 157, 131, 0.3);
+}
+
+.join-button:hover {
+  background: linear-gradient(135deg, #0d8a72, #0b7761);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(15, 157, 131, 0.4);
+}
+
+.join-button:active {
+  transform: translateY(0);
+}
+
+/* Mobile responsiveness */
+@media (max-width: 768px) {
+  .student-login-page {
+    padding: 1rem;
+  }
+
+  .student-login-card {
+    padding: 2rem 1.5rem;
+  }
+
+  .student-login-card h1 {
+    font-size: 1.5rem;
+  }
+
+  .login-subtitle {
+    font-size: 0.9rem;
+  }
+}
