@@ -350,6 +350,7 @@
   touch-action: none;
   -webkit-user-select: none;
   user-select: none;
+  -webkit-touch-callout: none;
 }
 
 /* Landscape tablet mode - reduce spacing to fit all items */

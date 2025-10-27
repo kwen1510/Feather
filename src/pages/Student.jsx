@@ -138,6 +138,19 @@ function Student() {
   const isRemoteUpdate = useRef(false);
   const eraserStateSaved = useRef(false);
 
+  // Performance optimization: keep current line in ref to avoid re-renders
+  const currentLineRef = useRef(null);
+  const animationFrameRef = useRef(null);
+
+  // Cleanup animation frame on unmount
+  useEffect(() => {
+    return () => {
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+      }
+    };
+  }, []);
+
   const canvasWrapperRef = useRef(null);
   const [canvasSize, setCanvasSize] = useState(BASE_CANVAS);
   const canvasScale = useMemo(
@@ -329,9 +342,13 @@ function Student() {
         strokeWidth: brushSize / canvasScale,
       };
 
+      // Store in ref for smooth drawing
+      currentLineRef.current = newLine;
+
       undoStack.current.push([...studentLines]);
       redoStack.current = [];
 
+      // Immediately add the line to state
       setStudentLines([...studentLines, newLine]);
     } else if (tool === 'eraser') {
       setIsDrawing(true);
@@ -340,6 +357,9 @@ function Student() {
 
     if (evt.preventDefault) {
       evt.preventDefault();
+    }
+    if (evt.stopPropagation) {
+      evt.stopPropagation();
     }
   };
 
@@ -358,15 +378,32 @@ function Student() {
     const point = stage.getPointerPosition();
 
     if (tool === 'pen') {
-      const lastLine = studentLines[studentLines.length - 1];
-      if (lastLine) {
+      // Update the ref immediately for smooth drawing
+      if (currentLineRef.current) {
         const baseX = point.x / canvasScale;
         const baseY = point.y / canvasScale;
-        const updatedLine = {
-          ...lastLine,
-          points: [...lastLine.points, baseX, baseY],
-        };
-        setStudentLines([...studentLines.slice(0, -1), updatedLine]);
+        currentLineRef.current.points = currentLineRef.current.points.concat([baseX, baseY]);
+
+        // Capture line in local variable before async operation
+        const lineToUpdate = currentLineRef.current;
+
+        // Cancel any pending animation frame
+        if (animationFrameRef.current) {
+          cancelAnimationFrame(animationFrameRef.current);
+        }
+
+        // Batch update using requestAnimationFrame for smooth rendering
+        animationFrameRef.current = requestAnimationFrame(() => {
+          if (lineToUpdate) {
+            setStudentLines(prev => {
+              // Make sure we're updating the last line
+              if (prev.length > 0) {
+                return [...prev.slice(0, -1), lineToUpdate];
+              }
+              return prev;
+            });
+          }
+        });
       }
     } else if (tool === 'eraser') {
       const previousLength = studentLines.length;
@@ -398,6 +435,9 @@ function Student() {
     if (evt?.preventDefault) {
       evt.preventDefault();
     }
+    if (evt?.stopPropagation) {
+      evt.stopPropagation();
+    }
   };
 
   const handlePointerUp = (e) => {
@@ -409,6 +449,7 @@ function Student() {
       return;
     }
     setIsDrawing(false);
+    currentLineRef.current = null; // Clear the current line ref
   };
 
   const handleUndo = () => {
