@@ -474,6 +474,7 @@ function Student() {
           .single();
 
         const annotationData = {
+          session_id: sessionId,
           question_id: currentQuestionId,
           participant_id: participantId,
           student_lines: studentLines,

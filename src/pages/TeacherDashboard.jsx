@@ -785,20 +785,24 @@ const TeacherDashboard = () => {
         setSharedImage(null);
         setStagedTemplate(null);
         setImageMessage(`Question ${newQuestionNumber}: Blank canvas sent to all students.`);
+        showToast(`Question ${newQuestionNumber} sent!`, 'success');
       } else if (prepTab === 'templates' && stagedTemplate) {
         // Send template
         await channel.publish('teacher-template', stagedTemplate);
         setSharedImage(stagedTemplate); // Store as shared content
         setImageMessage(`Question ${newQuestionNumber}: Template sent to all students.`);
+        showToast(`Question ${newQuestionNumber} sent!`, 'success');
       } else if (prepTab === 'image' && stagedImage) {
         // Send image
         await channel.publish('teacher-image', stagedImage);
         setSharedImage(stagedImage);
         setImageMessage(`Question ${newQuestionNumber}: Image sent to all students.`);
+        showToast(`Question ${newQuestionNumber} sent!`, 'success');
       }
     } catch (error) {
       console.error('Failed to send to class:', error);
       setImageMessage('Failed to send. Please try again.');
+      showToast('Failed to send question', 'error');
     }
   };
 
@@ -912,6 +916,7 @@ const TeacherDashboard = () => {
           <div key={toast.id} className={`toast toast-${toast.type}`}>
             {toast.type === 'success' && <span className="toast-icon">✓</span>}
             {toast.type === 'info' && <span className="toast-icon">ℹ</span>}
+            {toast.type === 'error' && <span className="toast-icon">✕</span>}
             <span className="toast-message">{toast.message}</span>
           </div>
         ))}
