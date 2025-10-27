@@ -26,7 +26,8 @@ const TeacherDashboard = () => {
   const getRoomId = () => {
     const urlRoom = searchParams.get('room');
     if (urlRoom) {
-      return urlRoom;
+      // Always convert to uppercase for consistency
+      return urlRoom.toUpperCase();
     }
     // Generate new room code
     const newCode = generateRoomCode();
@@ -122,11 +123,11 @@ const TeacherDashboard = () => {
       try {
         console.log('📝 Initializing session in Supabase with room code:', roomId);
 
-        // First, check if a session already exists for this room
+        // First, check if a session already exists for this room (case-insensitive)
         const { data: existingSessions, error: queryError } = await supabase
           .from('sessions')
           .select('*')
-          .eq('room_code', roomId)
+          .ilike('room_code', roomId)
           .order('created_at', { ascending: false })
           .limit(1);
 

@@ -225,11 +225,11 @@ function Student() {
       try {
         console.log('📝 Student validating session for room:', roomId);
 
-        // Check if session exists for this room
+        // Check if session exists for this room (case-insensitive)
         const { data: sessions, error: sessionError } = await supabase
           .from('sessions')
           .select('*')
-          .eq('room_code', roomId)
+          .ilike('room_code', roomId)
           .order('created_at', { ascending: false })
           .limit(1);
 

@@ -7,7 +7,7 @@ function StudentLogin() {
   const navigate = useNavigate();
 
   const [name, setName] = useState('');
-  const [sessionCode, setSessionCode] = useState(searchParams.get('room') || '');
+  const [sessionCode, setSessionCode] = useState((searchParams.get('room') || '').toUpperCase());
   const [error, setError] = useState('');
 
   const handleSubmit = (e) => {
