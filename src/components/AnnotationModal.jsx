@@ -138,7 +138,7 @@ const AnnotationModal = ({
     };
   }, []);
 
-  // Prevent body scrolling when modal is open
+  // Prevent body scrolling and touch events when modal is open
   useEffect(() => {
     if (isOpen) {
       // Save original body overflow
@@ -152,14 +152,43 @@ const AnnotationModal = ({
       document.body.style.width = '100%';
       document.body.style.touchAction = 'none';
 
+      // Prevent touch events and gestures globally
+      const preventTouch = (e) => {
+        e.preventDefault();
+      };
+
+      const preventGesture = (e) => {
+        e.preventDefault();
+      };
+
+      const preventSelection = (e) => {
+        if (isDrawing) {
+          e.preventDefault();
+          return false;
+        }
+      };
+
+      document.addEventListener('touchstart', preventTouch, { passive: false });
+      document.addEventListener('touchmove', preventTouch, { passive: false });
+      document.addEventListener('gesturestart', preventGesture, { passive: false });
+      document.addEventListener('gesturechange', preventGesture, { passive: false });
+      document.addEventListener('selectstart', preventSelection);
+
       return () => {
         // Restore original styles
         document.body.style.overflow = originalOverflow;
         document.body.style.position = originalPosition;
         document.body.style.touchAction = originalTouchAction;
+
+        // Remove event listeners
+        document.removeEventListener('touchstart', preventTouch);
+        document.removeEventListener('touchmove', preventTouch);
+        document.removeEventListener('gesturestart', preventGesture);
+        document.removeEventListener('gesturechange', preventGesture);
+        document.removeEventListener('selectstart', preventSelection);
       };
     }
-  }, [isOpen]);
+  }, [isOpen, isDrawing]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -563,8 +592,9 @@ const AnnotationModal = ({
                   onPointerMove={handlePointerMove}
                   onPointerUp={handlePointerUp}
                   onPointerLeave={handlePointerUp}
-                  onTouchMove={(e) => e.preventDefault()}
                   onTouchStart={(e) => e.preventDefault()}
+                  onTouchMove={(e) => e.preventDefault()}
+                  onTouchEnd={(e) => e.preventDefault()}
                   className="annotation-stage"
                   perfectDrawEnabled={false}
                 >

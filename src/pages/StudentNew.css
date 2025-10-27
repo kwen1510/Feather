@@ -11,6 +11,9 @@
   align-items: center;
   justify-content: center;
   overflow: hidden;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
 }
 
 .student-canvas-container {

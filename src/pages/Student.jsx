@@ -151,6 +151,40 @@ function Student() {
     };
   }, []);
 
+  // Prevent touch events and text selection globally
+  useEffect(() => {
+    const preventTouch = (e) => {
+      e.preventDefault();
+    };
+
+    const preventGesture = (e) => {
+      e.preventDefault();
+    };
+
+    // Prevent text selection during drawing
+    const preventSelection = (e) => {
+      if (isDrawing) {
+        e.preventDefault();
+        return false;
+      }
+    };
+
+    // Add passive: false to allow preventDefault
+    document.addEventListener('touchstart', preventTouch, { passive: false });
+    document.addEventListener('touchmove', preventTouch, { passive: false });
+    document.addEventListener('gesturestart', preventGesture, { passive: false });
+    document.addEventListener('gesturechange', preventGesture, { passive: false });
+    document.addEventListener('selectstart', preventSelection);
+
+    return () => {
+      document.removeEventListener('touchstart', preventTouch);
+      document.removeEventListener('touchmove', preventTouch);
+      document.removeEventListener('gesturestart', preventGesture);
+      document.removeEventListener('gesturechange', preventGesture);
+      document.removeEventListener('selectstart', preventSelection);
+    };
+  }, [isDrawing]);
+
   const canvasWrapperRef = useRef(null);
   const stageRef = useRef(null);
   const [canvasSize, setCanvasSize] = useState(BASE_CANVAS);
@@ -668,6 +702,9 @@ function Student() {
                   onPointerMove={handlePointerMove}
                   onPointerUp={handlePointerUp}
                   onPointerLeave={handlePointerUp}
+                  onTouchStart={(e) => { e.evt?.preventDefault?.(); }}
+                  onTouchMove={(e) => { e.evt?.preventDefault?.(); }}
+                  onTouchEnd={(e) => { e.evt?.preventDefault?.(); }}
                   className="canvas-stage"
                   style={{ touchAction: 'none' }}
                   perfectDrawEnabled={false}
