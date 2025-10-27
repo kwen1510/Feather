@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS participants (
   session_id UUID NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
   client_id TEXT NOT NULL,
   role TEXT NOT NULL CHECK (role IN ('teacher', 'student')),
-  student_name TEXT,
+  name TEXT,
   is_flagged BOOLEAN DEFAULT FALSE,
   joined_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   left_at TIMESTAMP WITH TIME ZONE
