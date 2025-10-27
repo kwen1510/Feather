@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Stage, Layer, Line, Image as KonvaImage } from 'react-konva';
 import * as Ably from 'ably';
+import { supabase } from '../supabaseClient';
 import './StudentNew.css';
 
 const BASE_CANVAS = { width: 800, height: 600 };
@@ -70,6 +71,12 @@ function Student() {
   const [channel, setChannel] = useState(null);
   const [clientId] = useState(`student-${Math.random().toString(36).substr(2, 9)}`);
   const [isConnected, setIsConnected] = useState(false);
+
+  // Supabase session tracking
+  const [sessionId, setSessionId] = useState(null);
+  const [participantId, setParticipantId] = useState(null);
+  const [sessionStatus, setSessionStatus] = useState('loading'); // 'loading' | 'waiting' | 'active' | 'ended'
+  const [currentQuestionId, setCurrentQuestionId] = useState(null);
 
   // Student lines (editable, stored in base 800x600 coordinates)
   const [studentLines, setStudentLines] = useState([]);
@@ -204,6 +211,69 @@ function Student() {
     [canvasSize.width]
   );
 
+  // Validate session and create participant record
+  useEffect(() => {
+    const initializeSession = async () => {
+      try {
+        console.log('📝 Student validating session for room:', roomId);
+
+        // Check if session exists for this room
+        const { data: sessions, error: sessionError } = await supabase
+          .from('sessions')
+          .select('*')
+          .eq('room_code', roomId)
+          .order('created_at', { ascending: false })
+          .limit(1);
+
+        if (sessionError) {
+          console.error('Failed to query session:', sessionError);
+          setSessionStatus('ended');
+          return;
+        }
+
+        if (!sessions || sessions.length === 0) {
+          console.log('❌ No session found for room:', roomId);
+          setSessionStatus('ended');
+          return;
+        }
+
+        const session = sessions[0];
+        console.log('✅ Session found:', session);
+
+        setSessionId(session.id);
+        setSessionStatus(session.status === 'active' ? 'active' : 'waiting');
+
+        // Create participant record
+        const { data: participant, error: participantError } = await supabase
+          .from('participants')
+          .insert([
+            {
+              session_id: session.id,
+              client_id: clientId,
+              name: studentName,
+              role: 'student',
+            }
+          ])
+          .select()
+          .single();
+
+        if (participantError) {
+          console.error('Failed to create participant:', participantError);
+          return;
+        }
+
+        console.log('👤 Participant created:', participant);
+        setParticipantId(participant.id);
+
+      } catch (error) {
+        console.error('Error initializing session:', error);
+        setSessionStatus('ended');
+      }
+    };
+
+    initializeSession();
+  }, [roomId, clientId, studentName]);
+
   // Initialize Ably connection
   useEffect(() => {
     const initAbly = async () => {
@@ -277,12 +347,30 @@ function Student() {
         // Listen for clear all drawings command (when teacher sends new content)
         whiteboardChannel.subscribe('clear-all-drawings', (message) => {
           console.log('📝 Clearing all drawings (teacher sent new content)');
+
+          // Track the new question
+          if (message.data?.questionId) {
+            setCurrentQuestionId(message.data.questionId);
+          }
+
           isRemoteUpdate.current = true;
           setStudentLines([]); // Clear student's own drawings
           setTeacherLines([]); // Clear teacher annotations
           setTimeout(() => {
             isRemoteUpdate.current = false;
           }, 100);
+        });
+
+        // Listen for session started
+        whiteboardChannel.subscribe('session-started', (message) => {
+          console.log('🎉 Session started!');
+          setSessionStatus('active');
+        });
+
+        // Listen for session ended
+        whiteboardChannel.subscribe('session-ended', (message) => {
+          console.log('🛑 Session ended:', message.data?.reason);
+          setSessionStatus('ended');
         });
 
         // Enter presence with student name
@@ -360,6 +448,66 @@ function Student() {
       return () => clearTimeout(timer);
     }
   }, [studentLines, channel, clientId, canvasSize, canvasScale]);
+
+  // Auto-save student work to Supabase every 10 seconds
+  useEffect(() => {
+    if (!sessionId || !participantId || !currentQuestionId || sessionStatus !== 'active') {
+      return;
+    }
+
+    const autoSave = async () => {
+      try {
+        // Check if annotation exists for this question and student
+        const { data: existing, error: queryError } = await supabase
+          .from('annotations')
+          .select('id')
+          .eq('question_id', currentQuestionId)
+          .eq('participant_id', participantId)
+          .single();
+
+        const annotationData = {
+          question_id: currentQuestionId,
+          participant_id: participantId,
+          student_work: studentLines,
+        };
+
+        if (existing) {
+          // Update existing annotation
+          const { error: updateError } = await supabase
+            .from('annotations')
+            .update(annotationData)
+            .eq('id', existing.id);
+
+          if (updateError) {
+            console.error('Failed to update annotation:', updateError);
+          } else {
+            console.log('💾 Auto-saved student work');
+          }
+        } else {
+          // Create new annotation
+          const { error: insertError } = await supabase
+            .from('annotations')
+            .insert([annotationData]);
+
+          if (insertError) {
+            console.error('Failed to create annotation:', insertError);
+          } else {
+            console.log('💾 Created new annotation');
+          }
+        }
+      } catch (error) {
+        console.error('Auto-save error:', error);
+      }
+    };
+
+    // Save immediately when question changes
+    autoSave();
+
+    // Then save every 10 seconds
+    const interval = setInterval(autoSave, 10000);
+
+    return () => clearInterval(interval);
+  }, [studentLines, sessionId, participantId, currentQuestionId, sessionStatus]);
 
   const isAllowedPointerEvent = (evt) => {
     if (inputMode !== 'stylus-only') return true;
@@ -572,6 +720,37 @@ function Student() {
 
   return (
     <div className="student-canvas-page">
+      {/* Session status overlays */}
+      {sessionStatus === 'loading' && (
+        <div className="session-overlay">
+          <div className="session-message">
+            <div className="session-spinner"></div>
+            <h2>Connecting to session...</h2>
+            <p>Please wait while we verify your session</p>
+          </div>
+        </div>
+      )}
+
+      {sessionStatus === 'waiting' && (
+        <div className="session-overlay">
+          <div className="session-message">
+            <div className="session-icon waiting">⏳</div>
+            <h2>Waiting for teacher</h2>
+            <p>Your teacher hasn't started the session yet. Please wait...</p>
+          </div>
+        </div>
+      )}
+
+      {sessionStatus === 'ended' && (
+        <div className="session-overlay">
+          <div className="session-message">
+            <div className="session-icon ended">✓</div>
+            <h2>Session ended</h2>
+            <p>Thank you for participating! The teacher has ended this session.</p>
+          </div>
+        </div>
+      )}
+
       <div className="student-canvas-container">
         <div className="student-status-bar">
           <div className="student-status-text">

@@ -93,8 +93,19 @@ const TeacherDashboard = () => {
   const imageInputRef = useRef(null);
   const [showQRModal, setShowQRModal] = useState(false);
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState('');
+  const [toasts, setToasts] = useState([]);
 
   const isRemoteUpdate = useRef(false);
+
+  // Toast notification helper
+  const showToast = (message, type = 'info') => {
+    const id = Date.now();
+    setToasts(prev => [...prev, { id, message, type }]);
+    // Auto-remove after 4 seconds
+    setTimeout(() => {
+      setToasts(prev => prev.filter(t => t.id !== id));
+    }, 4000);
+  };
 
   // Save settings to localStorage
   useEffect(() => {
@@ -183,6 +194,27 @@ const TeacherDashboard = () => {
         if (session) {
           setSessionId(session.id);
           setSessionStatus(session.status);
+
+          // Create teacher participant record
+          const { data: participant, error: participantError } = await supabase
+            .from('participants')
+            .insert([
+              {
+                session_id: session.id,
+                client_id: clientId,
+                name: 'Teacher',
+                role: 'teacher',
+              }
+            ])
+            .select()
+            .single();
+
+          if (participantError) {
+            console.error('Failed to create teacher participant:', participantError);
+          } else {
+            console.log('👤 Teacher participant created:', participant);
+            setParticipantId(participant.id);
+          }
         }
       } catch (error) {
         console.error('Error initializing session:', error);
@@ -249,13 +281,18 @@ const TeacherDashboard = () => {
         // Listen for presence events (student connect/disconnect)
         whiteboardChannel.presence.subscribe('enter', (member) => {
           if (member.clientId !== clientId && member.clientId.includes('student')) {
-            console.log('👋 Student joined:', member.clientId, 'Name:', member.data?.name);
+            const studentName = member.data?.name || extractStudentName(member.clientId);
+            console.log('👋 Student joined:', member.clientId, 'Name:', studentName);
+
+            // Show toast notification
+            showToast(`${studentName} joined`, 'success');
+
             setStudents(prev => ({
               ...prev,
               [member.clientId]: {
                 ...(prev[member.clientId] || {}),
                 clientId: member.clientId,
-                name: member.data?.name || extractStudentName(member.clientId),
+                name: studentName,
                 isActive: true,
                 lastUpdate: Date.now(),
                 isFlagged: prev[member.clientId]?.isFlagged || false,
@@ -267,14 +304,23 @@ const TeacherDashboard = () => {
         whiteboardChannel.presence.subscribe('leave', (member) => {
           if (member.clientId !== clientId && member.clientId.includes('student')) {
             console.log('👋 Student left:', member.clientId);
-            setStudents(prev => ({
-              ...prev,
-              [member.clientId]: {
-                ...(prev[member.clientId] || {}),
-                isActive: false,
-                isFlagged: prev[member.clientId]?.isFlagged || false,
-              }
-            }));
+
+            setStudents(prev => {
+              const student = prev[member.clientId];
+              const studentName = student?.name || extractStudentName(member.clientId);
+
+              // Show toast notification
+              showToast(`${studentName} left`, 'info');
+
+              return {
+                ...prev,
+                [member.clientId]: {
+                  ...(prev[member.clientId] || {}),
+                  isActive: false,
+                  isFlagged: prev[member.clientId]?.isFlagged || false,
+                }
+              };
+            });
           }
         });
 
@@ -713,7 +759,10 @@ const TeacherDashboard = () => {
       setCurrentQuestionId(question.id);
 
       // Clear all student drawings and teacher annotations
-      await channel.publish('clear-all-drawings', { timestamp: Date.now() });
+      await channel.publish('clear-all-drawings', {
+        timestamp: Date.now(),
+        questionId: question.id,
+      });
 
       // Clear local state
       setStudents(prev => {
@@ -856,6 +905,17 @@ const TeacherDashboard = () => {
 
   return (
     <div className="teacher-dashboard">
+      {/* Toast notifications */}
+      <div className="toast-container">
+        {toasts.map(toast => (
+          <div key={toast.id} className={`toast toast-${toast.type}`}>
+            {toast.type === 'success' && <span className="toast-icon">✓</span>}
+            {toast.type === 'info' && <span className="toast-icon">ℹ</span>}
+            <span className="toast-message">{toast.message}</span>
+          </div>
+        ))}
+      </div>
+
       <div className="dashboard-shell">
         <button className="back-link" onClick={handleBack}>
           ← Exit class
