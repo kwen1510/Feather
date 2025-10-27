@@ -476,3 +476,214 @@
     flex-direction: column;
   }
 }
+
+/* Mobile phones (portrait and landscape) */
+@media (max-width: 768px) {
+  .annotation-modal-overlay {
+    padding: 0.5rem;
+  }
+
+  .annotation-modal {
+    width: 100vw;
+    height: 100vh;
+    border-radius: 1rem;
+  }
+
+  .annotation-console {
+    padding: 0.75rem;
+    gap: 0.75rem;
+  }
+
+  .annotation-status-bar {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
+  }
+
+  .annotation-status-text h1 {
+    font-size: 1rem;
+  }
+
+  .annotation-status-text p {
+    font-size: 0.75rem;
+  }
+
+  .annotation-status-actions {
+    width: 100%;
+    justify-content: space-between;
+    flex-wrap: wrap;
+  }
+
+  .tool-status-indicator {
+    padding: 6px 12px;
+    margin-right: 0;
+  }
+
+  .tool-status-text {
+    font-size: 11px;
+  }
+
+  .flag-pill, .status-badge {
+    padding: 6px 12px;
+    font-size: 0.75rem;
+  }
+
+  .annotation-workspace,
+  .annotation-workspace.toolbar-right {
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+
+  .annotation-sidebar {
+    flex-direction: row;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    max-height: 200px;
+    padding: 0.75rem;
+    gap: 1rem;
+    flex: 0 0 auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
+  }
+
+  .annotation-sidebar::-webkit-scrollbar {
+    height: 6px;
+  }
+
+  .annotation-sidebar::-webkit-scrollbar-track {
+    background: #f1f5f9;
+    border-radius: 10px;
+  }
+
+  .annotation-sidebar::-webkit-scrollbar-thumb {
+    background: #94a3b8;
+    border-radius: 10px;
+  }
+
+  .annotation-sidebar .sidebar-section {
+    flex: 0 0 auto;
+    min-width: 140px;
+  }
+
+  .sidebar-header {
+    display: none;
+  }
+
+  .sidebar-label {
+    font-size: 0.65rem;
+  }
+
+  .color-row {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+  }
+
+  .color-button {
+    width: 32px;
+    height: 32px;
+  }
+
+  .tool-icon-buttons {
+    gap: 0.5rem;
+  }
+
+  .tool-icon-button {
+    height: 44px;
+    padding: 0 0.75rem;
+    font-size: 20px;
+  }
+
+  .tool-label {
+    font-size: 13px;
+  }
+
+  .brush-size-control {
+    gap: 0.5rem;
+  }
+
+  .brush-value {
+    font-size: 0.85rem;
+  }
+
+  .history-button {
+    padding: 0.5rem 0.75rem;
+    font-size: 0.8rem;
+  }
+
+  .input-mode-toggle {
+    padding: 0.5rem 0.75rem;
+    font-size: 0.8rem;
+  }
+
+  .annotation-canvas-panel {
+    flex: 1;
+    min-height: 400px;
+  }
+
+  .annotation-canvas-frame {
+    padding: 0.5rem;
+  }
+}
+
+/* Very small phones (< 480px) */
+@media (max-width: 480px) {
+  .annotation-modal-overlay {
+    padding: 0.25rem;
+  }
+
+  .annotation-modal {
+    border-radius: 0.75rem;
+  }
+
+  .annotation-console {
+    padding: 0.5rem;
+    gap: 0.5rem;
+  }
+
+  .annotation-status-text h1 {
+    font-size: 0.9rem;
+  }
+
+  .annotation-status-text p {
+    font-size: 0.7rem;
+  }
+
+  .annotation-sidebar {
+    padding: 0.5rem;
+    gap: 0.75rem;
+    max-height: 180px;
+  }
+
+  .annotation-sidebar .sidebar-section {
+    min-width: 120px;
+  }
+
+  .sidebar-label {
+    font-size: 0.6rem;
+  }
+
+  .color-button {
+    width: 28px;
+    height: 28px;
+  }
+
+  .tool-icon-button {
+    height: 40px;
+    padding: 0 0.5rem;
+    font-size: 18px;
+  }
+
+  .tool-label {
+    font-size: 12px;
+  }
+
+  .annotation-canvas-panel {
+    min-height: 350px;
+  }
+
+  .annotation-canvas-frame {
+    padding: 0.35rem;
+  }
+}
