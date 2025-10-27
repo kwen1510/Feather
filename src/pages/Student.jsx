@@ -468,7 +468,7 @@ function Student() {
         const annotationData = {
           question_id: currentQuestionId,
           participant_id: participantId,
-          student_work: studentLines,
+          student_lines: studentLines,
         };
 
         if (existing) {
