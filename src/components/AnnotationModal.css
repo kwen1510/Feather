@@ -41,6 +41,8 @@
   align-items: center;
   gap: 1rem;
   flex-wrap: wrap;
+  min-width: 0;
+  width: 100%;
 }
 
 .annotation-status-text h1 {
@@ -61,6 +63,8 @@
   align-items: center;
   gap: 0.75rem;
   flex-wrap: wrap;
+  flex-shrink: 1;
+  min-width: 0;
 }
 
 .status-badge {
@@ -73,6 +77,9 @@
   color: #0f503f;
   cursor: pointer;
   transition: transform 0.2s ease;
+  white-space: nowrap;
+  flex-shrink: 0;
+  box-sizing: border-box;
 }
 
 .status-badge.active {
@@ -101,6 +108,9 @@
   font-size: 0.8rem;
   color: #5b6373;
   cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  box-sizing: border-box;
 }
 
 .flag-pill.active {
@@ -461,6 +471,27 @@
 
   .brush-size-control {
     gap: 0.4rem;
+  }
+}
+
+/* Medium screens - reduce button sizes slightly */
+@media (max-width: 1200px) {
+  .status-badge {
+    padding: 0.4rem 0.85rem;
+    font-size: 0.8rem;
+  }
+
+  .flag-pill {
+    padding: 0.35rem 0.8rem;
+    font-size: 0.75rem;
+  }
+
+  .annotation-status-text h1 {
+    font-size: 1.2rem;
+  }
+
+  .annotation-status-actions {
+    gap: 0.6rem;
   }
 }
 
