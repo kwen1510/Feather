@@ -5,6 +5,7 @@ import QRCode from 'qrcode';
 import StudentCard from '../components/StudentCard';
 import AnnotationModal from '../components/AnnotationModal';
 import { resizeAndCompressImage } from '../utils/imageUtils';
+import { supabase } from '../supabaseClient';
 import './TeacherDashboard.css';
 
 const TeacherDashboard = () => {
@@ -35,6 +36,13 @@ const TeacherDashboard = () => {
   };
 
   const [roomId] = React.useState(getRoomId);
+
+  // Supabase session tracking
+  const [sessionId, setSessionId] = useState(null);
+  const [participantId, setParticipantId] = useState(null);
+  const [currentQuestionId, setCurrentQuestionId] = useState(null);
+  const [questionNumber, setQuestionNumber] = useState(0);
+  const [sessionStatus, setSessionStatus] = useState('created'); // 'created' | 'active' | 'ended'
 
   // Ably connection
   const [ably, setAbly] = useState(null);
@@ -96,6 +104,40 @@ const TeacherDashboard = () => {
   useEffect(() => {
     localStorage.setItem('teacherDashboardCardsPerRow', cardsPerRow.toString());
   }, [cardsPerRow]);
+
+  // Create session in Supabase when dashboard loads
+  useEffect(() => {
+    const createSession = async () => {
+      try {
+        console.log('📝 Creating session in Supabase with room code:', roomId);
+
+        // Create session
+        const { data: session, error: sessionError } = await supabase
+          .from('sessions')
+          .insert([
+            {
+              room_code: roomId,
+              status: 'created',
+            }
+          ])
+          .select()
+          .single();
+
+        if (sessionError) {
+          console.error('Failed to create session:', sessionError);
+          return;
+        }
+
+        console.log('✅ Session created:', session);
+        setSessionId(session.id);
+        setSessionStatus(session.status);
+      } catch (error) {
+        console.error('Error creating session:', error);
+      }
+    };
+
+    createSession();
+  }, [roomId]);
 
   // Connect to Ably
   useEffect(() => {
@@ -190,22 +232,93 @@ const TeacherDashboard = () => {
         });
 
         // Enter presence
-        whiteboardChannel.presence.enter();
+        await whiteboardChannel.presence.enter();
 
         setChannel(whiteboardChannel);
+
+        // Create teacher participant record in Supabase
+        if (sessionId) {
+          try {
+            const { data: participant, error: participantError } = await supabase
+              .from('participants')
+              .insert([
+                {
+                  session_id: sessionId,
+                  client_id: clientId,
+                  role: 'teacher',
+                }
+              ])
+              .select()
+              .single();
+
+            if (participantError) {
+              console.error('Failed to create teacher participant:', participantError);
+            } else {
+              console.log('✅ Teacher participant created:', participant);
+              setParticipantId(participant.id);
+            }
+          } catch (error) {
+            console.error('Error creating teacher participant:', error);
+          }
+        }
       } catch (error) {
         console.error('Failed to connect to Ably:', error);
       }
     };
 
-    connectToAbly();
+    // Only connect when we have a sessionId
+    if (sessionId) {
+      connectToAbly();
+    }
 
     return () => {
       if (ably) {
         ably.close();
       }
     };
-  }, [roomId, clientId]);
+  }, [roomId, clientId, sessionId]);
+
+  // Refresh protection and session end handling
+  useEffect(() => {
+    const handleBeforeUnload = async (e) => {
+      if (sessionStatus === 'active' || sessionStatus === 'created') {
+        // Show browser confirmation dialog
+        e.preventDefault();
+        e.returnValue = 'This will end the session for all students. Are you sure?';
+
+        // End session in Supabase
+        if (sessionId) {
+          try {
+            await supabase
+              .from('sessions')
+              .update({
+                status: 'ended',
+                ended_at: new Date().toISOString(),
+              })
+              .eq('id', sessionId);
+
+            // Publish session-ended event via Ably
+            if (channel) {
+              await channel.publish('session-ended', {
+                timestamp: Date.now(),
+                reason: 'teacher_left',
+              });
+            }
+
+            console.log('✅ Session ended');
+          } catch (error) {
+            console.error('Error ending session:', error);
+          }
+        }
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [sessionStatus, sessionId, channel]);
 
   // Extract friendly name from clientId
   const extractStudentName = (clientId) => {
@@ -460,10 +573,93 @@ const TeacherDashboard = () => {
   };
 
   const handleSendToClass = async () => {
-    if (!channel) return;
+    if (!channel || !sessionId) return;
 
     try {
-      // Clear all student drawings and teacher annotations first
+      // If this is the first content being sent, start the session
+      const isFirstQuestion = sessionStatus === 'created';
+
+      if (isFirstQuestion) {
+        console.log('🎬 Starting session...');
+
+        // Update session to 'active'
+        const { error: sessionError } = await supabase
+          .from('sessions')
+          .update({
+            status: 'active',
+            started_at: new Date().toISOString(),
+          })
+          .eq('id', sessionId);
+
+        if (sessionError) {
+          console.error('Failed to start session:', sessionError);
+          setImageMessage('Failed to start session. Please try again.');
+          return;
+        }
+
+        setSessionStatus('active');
+
+        // Publish session-started event
+        await channel.publish('session-started', {
+          timestamp: Date.now(),
+          sessionId: sessionId,
+        });
+
+        console.log('✅ Session started!');
+      }
+
+      // Increment question number
+      const newQuestionNumber = questionNumber + 1;
+      setQuestionNumber(newQuestionNumber);
+
+      // Determine content type and data
+      let contentType = 'blank';
+      let templateType = null;
+      let imageData = null;
+
+      if (prepTab === 'templates' && stagedTemplate) {
+        contentType = 'template';
+        templateType = stagedTemplate.type;
+        imageData = {
+          dataUrl: stagedTemplate.dataUrl,
+          width: stagedTemplate.width,
+          height: stagedTemplate.height,
+        };
+      } else if (prepTab === 'image' && stagedImage) {
+        contentType = 'image';
+        imageData = {
+          dataUrl: stagedImage.dataUrl,
+          width: stagedImage.width,
+          height: stagedImage.height,
+          filename: stagedImage.filename,
+        };
+      }
+
+      // Create question record in Supabase
+      const { data: question, error: questionError } = await supabase
+        .from('questions')
+        .insert([
+          {
+            session_id: sessionId,
+            question_number: newQuestionNumber,
+            content_type: contentType,
+            template_type: templateType,
+            image_data: imageData,
+          }
+        ])
+        .select()
+        .single();
+
+      if (questionError) {
+        console.error('Failed to create question:', questionError);
+        setImageMessage('Failed to save question. Please try again.');
+        return;
+      }
+
+      console.log('✅ Question created:', question);
+      setCurrentQuestionId(question.id);
+
+      // Clear all student drawings and teacher annotations
       await channel.publish('clear-all-drawings', { timestamp: Date.now() });
 
       // Clear local state
@@ -479,22 +675,23 @@ const TeacherDashboard = () => {
       });
       setTeacherAnnotations({}); // Clear all teacher annotations
 
+      // Send content to students
       if (prepTab === 'blank') {
         // Clear any existing template/image
         await channel.publish('teacher-clear', { timestamp: Date.now() });
         setSharedImage(null);
         setStagedTemplate(null);
-        setImageMessage('Cleared canvas for all students.');
+        setImageMessage(`Question ${newQuestionNumber}: Blank canvas sent to all students.`);
       } else if (prepTab === 'templates' && stagedTemplate) {
         // Send template
         await channel.publish('teacher-template', stagedTemplate);
         setSharedImage(stagedTemplate); // Store as shared content
-        setImageMessage('Template sent to all students.');
+        setImageMessage(`Question ${newQuestionNumber}: Template sent to all students.`);
       } else if (prepTab === 'image' && stagedImage) {
         // Send image
         await channel.publish('teacher-image', stagedImage);
         setSharedImage(stagedImage);
-        setImageMessage('Image sent to all students.');
+        setImageMessage(`Question ${newQuestionNumber}: Image sent to all students.`);
       }
     } catch (error) {
       console.error('Failed to send to class:', error);
@@ -503,7 +700,32 @@ const TeacherDashboard = () => {
   };
 
   // Handle going back
-  const handleBack = () => {
+  const handleBack = async () => {
+    // End session in Supabase
+    if (sessionId && (sessionStatus === 'active' || sessionStatus === 'created')) {
+      try {
+        await supabase
+          .from('sessions')
+          .update({
+            status: 'ended',
+            ended_at: new Date().toISOString(),
+          })
+          .eq('id', sessionId);
+
+        // Publish session-ended event
+        if (channel) {
+          await channel.publish('session-ended', {
+            timestamp: Date.now(),
+            reason: 'teacher_ended',
+          });
+        }
+
+        console.log('✅ Session ended');
+      } catch (error) {
+        console.error('Error ending session:', error);
+      }
+    }
+
     if (ably) {
       ably.close();
     }
