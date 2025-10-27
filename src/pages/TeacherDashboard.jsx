@@ -105,38 +105,91 @@ const TeacherDashboard = () => {
     localStorage.setItem('teacherDashboardCardsPerRow', cardsPerRow.toString());
   }, [cardsPerRow]);
 
-  // Create session in Supabase when dashboard loads
+  // Create or get existing session in Supabase when dashboard loads
   useEffect(() => {
-    const createSession = async () => {
+    const initializeSession = async () => {
       try {
-        console.log('📝 Creating session in Supabase with room code:', roomId);
+        console.log('📝 Initializing session in Supabase with room code:', roomId);
 
-        // Create session
-        const { data: session, error: sessionError } = await supabase
+        // First, check if a session already exists for this room
+        const { data: existingSessions, error: queryError } = await supabase
           .from('sessions')
-          .insert([
-            {
-              room_code: roomId,
-              status: 'created',
-            }
-          ])
-          .select()
-          .single();
+          .select('*')
+          .eq('room_code', roomId)
+          .order('created_at', { ascending: false })
+          .limit(1);
 
-        if (sessionError) {
-          console.error('Failed to create session:', sessionError);
+        if (queryError) {
+          console.error('Failed to query sessions:', queryError);
           return;
         }
 
-        console.log('✅ Session created:', session);
-        setSessionId(session.id);
-        setSessionStatus(session.status);
+        let session = null;
+
+        if (existingSessions && existingSessions.length > 0) {
+          const existingSession = existingSessions[0];
+
+          // If the existing session is ended, reset it to 'created' status
+          if (existingSession.status === 'ended') {
+            console.log('⏸️ Found ended session, resetting to created status');
+
+            const { data: updatedSession, error: updateError } = await supabase
+              .from('sessions')
+              .update({
+                status: 'created',
+                started_at: null,
+                ended_at: null,
+              })
+              .eq('id', existingSession.id)
+              .select()
+              .single();
+
+            if (updateError) {
+              console.error('Failed to update session:', updateError);
+              return;
+            }
+
+            session = updatedSession;
+            console.log('✅ Session reset to created:', session);
+          } else {
+            // Reuse the existing session if it's not ended
+            console.log('♻️ Reusing existing session:', existingSession);
+            session = existingSession;
+          }
+        } else {
+          // No existing session, create a new one
+          console.log('🆕 No existing session found, creating new one');
+
+          const { data: newSession, error: insertError } = await supabase
+            .from('sessions')
+            .insert([
+              {
+                room_code: roomId,
+                status: 'created',
+              }
+            ])
+            .select()
+            .single();
+
+          if (insertError) {
+            console.error('Failed to create session:', insertError);
+            return;
+          }
+
+          session = newSession;
+          console.log('✅ Session created:', session);
+        }
+
+        if (session) {
+          setSessionId(session.id);
+          setSessionStatus(session.status);
+        }
       } catch (error) {
-        console.error('Error creating session:', error);
+        console.error('Error initializing session:', error);
       }
     };
 
-    createSession();
+    initializeSession();
   }, [roomId]);
 
   // Connect to Ably
