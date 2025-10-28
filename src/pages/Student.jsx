@@ -404,10 +404,19 @@ function Student() {
         });
 
         // Enter presence with student name
-        whiteboardChannel.presence.enter({ name: studentName });
+        await whiteboardChannel.presence.enter({ name: studentName });
         console.log(`Joined room ${roomId} as ${studentName}`);
 
         setChannel(whiteboardChannel);
+
+        // Request current question state after joining (in case we're joining mid-session)
+        setTimeout(() => {
+          whiteboardChannel.publish('request-current-state', {
+            clientId: clientId,
+            timestamp: Date.now(),
+          });
+          console.log('📞 Requested current question state from teacher');
+        }, 1000); // Wait 1 second to ensure all subscriptions are set up
 
         return () => {
           ably.close();

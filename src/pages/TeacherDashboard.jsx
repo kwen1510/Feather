@@ -91,12 +91,18 @@ const TeacherDashboard = () => {
   const [imageMessage, setImageMessage] = useState('');
   const [isUploadingImage, setIsUploadingImage] = useState(false);
   const [sharedImage, setSharedImage] = useState(null); // Shared image sent to all students
+  const sharedImageRef = useRef(null); // Ref to access latest sharedImage in callbacks
   const imageInputRef = useRef(null);
   const [showQRModal, setShowQRModal] = useState(false);
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState('');
   const [toasts, setToasts] = useState([]);
 
   const isRemoteUpdate = useRef(false);
+
+  // Keep ref updated with latest sharedImage
+  useEffect(() => {
+    sharedImageRef.current = sharedImage;
+  }, [sharedImage]);
 
   // Toast notification helper
   const showToast = (message, type = 'info') => {
@@ -302,10 +308,10 @@ const TeacherDashboard = () => {
 
             // Send current question state to the newly joined student
             setTimeout(() => {
-              if (sharedImage) {
+              if (sharedImageRef.current) {
                 whiteboardChannel.publish('sync-question-state', {
                   targetClientId: member.clientId,
-                  content: sharedImage,
+                  content: sharedImageRef.current,
                   timestamp: Date.now(),
                 });
                 console.log('📤 Sent current question state to', member.clientId);
@@ -336,6 +342,25 @@ const TeacherDashboard = () => {
         whiteboardChannel.subscribe('teacher-image', (message) => {
           console.log('📸 Teacher dashboard received shared image');
           setSharedImage(message.data);
+        });
+
+        // Listen for students requesting current question state
+        whiteboardChannel.subscribe('request-current-state', (message) => {
+          console.log('📞 Student requesting current state:', message.clientId);
+
+          // Send current question state to the requesting student
+          setTimeout(() => {
+            if (sharedImageRef.current) {
+              whiteboardChannel.publish('sync-question-state', {
+                targetClientId: message.clientId,
+                content: sharedImageRef.current,
+                timestamp: Date.now(),
+              });
+              console.log('📤 Sent current question state to', message.clientId);
+            } else {
+              console.log('📭 No question state to send (blank canvas)');
+            }
+          }, 100);
         });
 
         // Enter presence
