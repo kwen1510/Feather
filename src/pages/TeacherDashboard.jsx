@@ -1250,7 +1250,7 @@ const TeacherDashboard = () => {
       </div>
 
       <div className="dashboard-shell">
-        <div className="feather-branding" onClick={() => navigate('/teacher')} style={{ cursor: 'pointer' }}>
+        <div className="feather-branding" onClick={() => window.location.reload()} style={{ cursor: 'pointer' }}>
           <Feather size={32} strokeWidth={2} />
           <span className="feather-text">Feather</span>
         </div>
