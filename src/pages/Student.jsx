@@ -37,9 +37,17 @@ const SharedImageLayer = ({ sharedImage, canvasWidth, canvasHeight }) => {
 
   if (!sharedImage || !image) return null;
 
+  // Use actual loaded image dimensions for accurate scaling
+  const imageWidth = image.naturalWidth || image.width;
+  const imageHeight = image.naturalHeight || image.height;
+
+  // Prevent division by zero
+  if (!imageWidth || !imageHeight || !canvasWidth || !canvasHeight) {
+    return null;
+  }
+
   // Calculate scaling to fit canvas while maintaining aspect ratio
-  // Longer side touches the edge
-  const imageAspect = sharedImage.width / sharedImage.height;
+  const imageAspect = imageWidth / imageHeight;
   const canvasAspect = canvasWidth / canvasHeight;
 
   let displayWidth, displayHeight, x, y;
@@ -57,6 +65,10 @@ const SharedImageLayer = ({ sharedImage, canvasWidth, canvasHeight }) => {
     x = (canvasWidth - displayWidth) / 2;
     y = 0;
   }
+
+  // Ensure dimensions don't exceed canvas bounds
+  displayWidth = Math.min(displayWidth, canvasWidth);
+  displayHeight = Math.min(displayHeight, canvasHeight);
 
   return (
     <KonvaImage
