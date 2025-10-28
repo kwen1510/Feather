@@ -146,20 +146,32 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 10px 16px;
-  font-size: 12px;
-  color: #666;
+  padding: 12px 16px;
+  font-size: 13px;
+  color: #333;
+  background: #f9f9f9;
+  min-height: 44px;
 }
 
 .last-update {
-  color: #999;
+  color: #666;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.last-update::before {
+  content: '🕒';
+  font-size: 14px;
 }
 
 .click-hint {
   color: #4CAF50;
-  font-weight: 500;
+  font-weight: 600;
   opacity: 0;
   transition: opacity 0.3s ease;
+  white-space: nowrap;
 }
 
 .student-card:hover .click-hint {

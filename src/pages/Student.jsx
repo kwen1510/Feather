@@ -424,7 +424,18 @@ function Student() {
         }, 1000); // Wait 1 second to ensure all subscriptions are set up
 
         return () => {
-          ably.close();
+          // Leave presence before closing connection
+          if (whiteboardChannel) {
+            whiteboardChannel.presence.leave().then(() => {
+              console.log('👋 Left presence as', clientId);
+              ably.close();
+            }).catch((err) => {
+              console.error('Error leaving presence:', err);
+              ably.close();
+            });
+          } else {
+            ably.close();
+          }
         };
       } catch (error) {
         console.error('Failed to initialize Ably:', error);
