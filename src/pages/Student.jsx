@@ -93,8 +93,16 @@ function Student() {
   const [inputMode, setInputMode] = useState('stylus-only'); // 'all' or 'stylus-only'
   const [toolbarPosition, setToolbarPosition] = useState('left'); // 'left' or 'right'
 
-  // Redirect to login if missing name or room
+  // Redirect to login if missing name or room, or if logging out from refresh
   useEffect(() => {
+    // Check if user is logging out from a refresh
+    const shouldLogout = sessionStorage.getItem('student-logout-on-load');
+    if (shouldLogout === 'true') {
+      sessionStorage.removeItem('student-logout-on-load');
+      navigate('/student-login');
+      return;
+    }
+
     if (!roomId || !studentName) {
       navigate(`/student-login${roomId ? `?room=${roomId}` : ''}`);
     }
@@ -352,6 +360,14 @@ function Student() {
           setSharedImage(null);
         });
 
+        // Listen for question state sync (when joining/rejoining)
+        whiteboardChannel.subscribe('sync-question-state', (message) => {
+          if (message.data.targetClientId === clientId) {
+            console.log('📥 Received current question state');
+            setSharedImage(message.data.content);
+          }
+        });
+
         // Listen for clear all drawings command (when teacher sends new content)
         whiteboardChannel.subscribe('clear-all-drawings', (message) => {
           console.log('📝 Clearing all drawings (teacher sent new content)');
@@ -456,6 +472,25 @@ function Student() {
       return () => clearTimeout(timer);
     }
   }, [studentLines, channel, clientId, canvasSize, canvasScale]);
+
+  // Handle page refresh - confirm and logout
+  useEffect(() => {
+    const handleBeforeUnload = (e) => {
+      // Set flag to logout on reload
+      sessionStorage.setItem('student-logout-on-load', 'true');
+
+      // Show browser confirmation dialog
+      e.preventDefault();
+      e.returnValue = 'Are you sure you want to leave? You will be logged out.';
+      return e.returnValue;
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, []);
 
   // Auto-save student work to Supabase every 10 seconds
   useEffect(() => {

@@ -299,6 +299,18 @@ const TeacherDashboard = () => {
                 isFlagged: prev[member.clientId]?.isFlagged || false,
               }
             }));
+
+            // Send current question state to the newly joined student
+            setTimeout(() => {
+              if (sharedImage) {
+                whiteboardChannel.publish('sync-question-state', {
+                  targetClientId: member.clientId,
+                  content: sharedImage,
+                  timestamp: Date.now(),
+                });
+                console.log('📤 Sent current question state to', member.clientId);
+              }
+            }, 500); // Small delay to ensure student is ready to receive
           }
         });
 
@@ -313,14 +325,9 @@ const TeacherDashboard = () => {
               // Show toast notification
               showToast(`${studentName} left`, 'info');
 
-              return {
-                ...prev,
-                [member.clientId]: {
-                  ...(prev[member.clientId] || {}),
-                  isActive: false,
-                  isFlagged: prev[member.clientId]?.isFlagged || false,
-                }
-              };
+              // Remove the student card entirely
+              const { [member.clientId]: removed, ...remaining } = prev;
+              return remaining;
             });
           }
         });
