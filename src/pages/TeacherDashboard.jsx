@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import Ably from 'ably/promises';
 import QRCode from 'qrcode';
+import { Feather } from 'lucide-react';
 import StudentCard from '../components/StudentCard';
 import AnnotationModal from '../components/AnnotationModal';
 import { resizeAndCompressImage } from '../utils/imageUtils';
@@ -1128,9 +1129,10 @@ const TeacherDashboard = () => {
       </div>
 
       <div className="dashboard-shell">
-        <button className="back-link" onClick={handleBack}>
-          ← Exit class
-        </button>
+        <div className="feather-branding">
+          <Feather size={32} strokeWidth={2} />
+          <span className="feather-text">Feather</span>
+        </div>
 
         <section className="hero-card glass-panel">
           <div className="hero-top">
@@ -1163,68 +1165,6 @@ const TeacherDashboard = () => {
               >
                 End Session
               </button>
-            </div>
-          </div>
-
-          <div className="hero-controls">
-            <div className="search-input-wrapper">
-              <span className="search-icon">🔍</span>
-              <input
-                type="text"
-                placeholder="Filter students"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="search-input"
-              />
-              {searchQuery && (
-                <button
-                  className="clear-search-btn"
-                  onClick={() => setSearchQuery('')}
-                  title="Clear search"
-                >
-                  ✕
-                </button>
-              )}
-            </div>
-
-            <div className="control-set">
-              <label className="hide-names-checkbox">
-                <input
-                  type="checkbox"
-                  checked={hideNames}
-                  onChange={(e) => setHideNames(e.target.checked)}
-                />
-                <span>Hide names</span>
-              </label>
-
-              <button
-                type="button"
-                className={`chip-button ${flagFilter === 'flagged' ? 'active' : ''}`}
-                onClick={() => setFlagFilter(prev => (prev === 'flagged' ? 'all' : 'flagged'))}
-              >
-                Flagged only
-              </button>
-
-              <button
-                type="button"
-                className={`chip-button ${distractedFilter === 'distracted' ? 'active' : ''}`}
-                onClick={() => setDistractedFilter(prev => (prev === 'distracted' ? 'all' : 'distracted'))}
-                title="Show only distracted students (switched away from tab)"
-              >
-                ⚠️ Distracted only
-              </button>
-
-              <div className="cards-select">
-                <span>Cards/row</span>
-                <select
-                  value={cardsPerRow}
-                  onChange={(e) => setCardsPerRow(Number(e.target.value))}
-                >
-                  <option value={2}>2</option>
-                  <option value={3}>3</option>
-                  <option value={4}>4</option>
-                </select>
-              </div>
             </div>
           </div>
         </section>
@@ -1393,6 +1333,70 @@ const TeacherDashboard = () => {
                 <p>Click "Send to class" to clear all students' canvases.</p>
               </div>
             )}
+          </div>
+        </section>
+
+        <section className="controls-section glass-panel">
+          <div className="hero-controls">
+            <div className="search-input-wrapper">
+              <span className="search-icon">🔍</span>
+              <input
+                type="text"
+                placeholder="Filter students"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="search-input"
+              />
+              {searchQuery && (
+                <button
+                  className="clear-search-btn"
+                  onClick={() => setSearchQuery('')}
+                  title="Clear search"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+
+            <div className="control-set">
+              <label className="hide-names-checkbox">
+                <input
+                  type="checkbox"
+                  checked={hideNames}
+                  onChange={(e) => setHideNames(e.target.checked)}
+                />
+                <span>Hide names</span>
+              </label>
+
+              <button
+                type="button"
+                className={`chip-button ${flagFilter === 'flagged' ? 'active' : ''}`}
+                onClick={() => setFlagFilter(prev => (prev === 'flagged' ? 'all' : 'flagged'))}
+              >
+                Flagged only
+              </button>
+
+              <button
+                type="button"
+                className={`chip-button ${distractedFilter === 'distracted' ? 'active' : ''}`}
+                onClick={() => setDistractedFilter(prev => (prev === 'distracted' ? 'all' : 'distracted'))}
+                title="Show only distracted students (switched away from tab)"
+              >
+                ⚠️ Distracted only
+              </button>
+
+              <div className="cards-select">
+                <span>Cards/row</span>
+                <select
+                  value={cardsPerRow}
+                  onChange={(e) => setCardsPerRow(Number(e.target.value))}
+                >
+                  <option value={2}>2</option>
+                  <option value={3}>3</option>
+                  <option value={4}>4</option>
+                </select>
+              </div>
+            </div>
           </div>
         </section>
 
