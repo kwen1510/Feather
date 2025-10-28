@@ -5,7 +5,7 @@ import * as Ably from 'ably';
 import { supabase } from '../supabaseClient';
 import { Pen, Eraser, Undo, Redo, Trash2 } from 'lucide-react';
 import { getOrCreateStudentId } from '../utils/identity';
-import { saveStudentWork, loadStudentWork, cleanupOldSessions, clearSessionData } from '../utils/indexedDB';
+import { saveStudentWork, loadStudentWork, cleanupOldSessions, clearSessionData, clearStudentWork } from '../utils/indexedDB';
 import './StudentNew.css';
 
 const BASE_CANVAS = { width: 800, height: 600 };
@@ -121,6 +121,10 @@ function Student() {
   const [toolbarPosition, setToolbarPosition] = useState('left'); // 'left' or 'right'
   const [isMobile, setIsMobile] = useState(isMobileDevice());
   const visibilityListenerAttached = useRef(false);
+
+  // Stroke restoration state
+  const [isRestoringStrokes, setIsRestoringStrokes] = useState(false);
+  const strokeRestorationTimeoutRef = useRef(null);
 
   // Redirect to login if missing name or room - DO THIS FIRST before any initialization
   useEffect(() => {
@@ -276,6 +280,15 @@ function Student() {
     return () => {
       if (animationFrameRef.current) {
         cancelAnimationFrame(animationFrameRef.current);
+      }
+    };
+  }, []);
+
+  // Cleanup restoration timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (strokeRestorationTimeoutRef.current) {
+        clearTimeout(strokeRestorationTimeoutRef.current);
       }
     };
   }, []);
@@ -705,6 +718,77 @@ function Student() {
           navigate('/student-login');
         });
 
+        // Listen for teacher stroke requests
+        subscribe('request-student-strokes', (message) => {
+          if (!isActive) return;
+
+          // Check if this request is for us (by clientId or studentId)
+          const { targetClientId, targetStudentId } = message.data || {};
+          if (targetClientId === clientId || targetStudentId === studentId) {
+            console.log('📨 Received request-student-strokes from teacher');
+
+            // Respond with our current strokes
+            const strokes = studentLinesRef.current || [];
+            whiteboardChannel.publish('student-strokes-response', {
+              clientId: clientId,
+              studentId: studentId,
+              strokes: strokes,
+              timestamp: Date.now()
+            });
+
+            console.log('📤 Sent', strokes.length, 'strokes to teacher');
+          }
+        });
+
+        // Listen for teacher stroke responses
+        subscribe('teacher-strokes-response', (message) => {
+          if (!isActive) return;
+
+          // Check if this response is for us
+          const { targetClientId, targetStudentId, strokes } = message.data || {};
+          if (targetClientId === clientId || targetStudentId === studentId) {
+            console.log('📨 Received teacher-strokes-response:', strokes?.length || 0, 'strokes');
+
+            // Clear restoration timeout
+            if (strokeRestorationTimeoutRef.current) {
+              clearTimeout(strokeRestorationTimeoutRef.current);
+              strokeRestorationTimeoutRef.current = null;
+            }
+
+            // Apply teacher strokes
+            if (strokes && strokes.length > 0) {
+              isRemoteUpdate.current = true;
+              setTeacherLines(strokes);
+
+              // Save to IndexedDB
+              if (studentId && sessionId && currentQuestionId) {
+                saveStudentWork(
+                  studentId,
+                  sessionId,
+                  currentQuestionId,
+                  studentLinesRef.current,
+                  {
+                    base: BASE_CANVAS,
+                    display: canvasSizeRef.current,
+                    scale: canvasScaleRef.current,
+                  },
+                  strokes
+                ).catch(err => {
+                  console.error('❌ Failed to save teacher strokes to IndexedDB:', err);
+                });
+              }
+
+              setTimeout(() => {
+                isRemoteUpdate.current = false;
+              }, 100);
+            }
+
+            // Hide loading state
+            setIsRestoringStrokes(false);
+            console.log('✅ Stroke restoration complete');
+          }
+        });
+
         // Enter presence with student name and initial visibility status
         await whiteboardChannel.presence.enter({
           name: studentName,
@@ -851,6 +935,9 @@ function Student() {
     const loadSavedWork = async () => {
       console.log('🔄 Checking IndexedDB memory for question:', currentQuestionId);
 
+      // Show loading state
+      setIsRestoringStrokes(true);
+
       // Capture current lines in case student already started drawing
       const currentLines = studentLinesRef.current || [];
       const hasDrawnWhileLoading = currentLines.length > 0;
@@ -908,6 +995,26 @@ function Student() {
           isRemoteUpdate.current = false;
           console.log('📤 Published', finalLines.length, 'strokes to teacher (', saved.lines.length, 'from IndexedDB +', currentLines.length, 'new)');
         }, 100);
+
+        // If we have saved teacher annotations, use them and hide loading immediately
+        if (saved.teacherAnnotations && saved.teacherAnnotations.length > 0) {
+          setIsRestoringStrokes(false);
+          console.log('✅ Using cached teacher annotations, no need to request');
+        } else {
+          // Request teacher strokes
+          console.log('🔄 Requesting teacher strokes...');
+          channel.publish('request-teacher-strokes', {
+            clientId: clientId,
+            studentId: studentId,
+            timestamp: Date.now()
+          });
+
+          // Set timeout to hide loading if no response (10 seconds)
+          strokeRestorationTimeoutRef.current = setTimeout(() => {
+            console.log('⏱️ Teacher stroke request timed out');
+            setIsRestoringStrokes(false);
+          }, 10000);
+        }
       } else {
         console.log('ℹ️ No saved work found in IndexedDB memory for this question - starting fresh');
 
@@ -928,6 +1035,20 @@ function Student() {
           );
           console.log('✅ New strokes saved to IndexedDB');
         }
+
+        // Request teacher strokes even if we don't have our own work
+        console.log('🔄 Requesting teacher strokes...');
+        channel.publish('request-teacher-strokes', {
+          clientId: clientId,
+          studentId: studentId,
+          timestamp: Date.now()
+        });
+
+        // Set timeout to hide loading if no response (10 seconds)
+        strokeRestorationTimeoutRef.current = setTimeout(() => {
+          console.log('⏱️ Teacher stroke request timed out');
+          setIsRestoringStrokes(false);
+        }, 10000);
       }
     };
 
@@ -1081,6 +1202,14 @@ function Student() {
 
   const handlePointerDown = (e) => {
     const evt = e.evt;
+
+    // Disable drawing while restoring strokes
+    if (isRestoringStrokes) {
+      if (evt?.preventDefault) {
+        evt.preventDefault();
+      }
+      return;
+    }
 
     if (!isAllowedPointerEvent(evt)) {
       if (evt?.preventDefault) {
@@ -1351,6 +1480,17 @@ function Student() {
             <p style={{ marginTop: '1rem', fontSize: '0.9rem', opacity: 0.8 }}>
               Redirecting to login...
             </p>
+          </div>
+        </div>
+      )}
+
+      {/* Stroke restoration overlay */}
+      {isRestoringStrokes && sessionStatus === 'active' && (
+        <div className="session-overlay" style={{ background: 'rgba(0, 0, 0, 0.5)' }}>
+          <div className="session-message">
+            <div className="session-spinner"></div>
+            <h2>Restoring canvas...</h2>
+            <p>Loading your previous work and teacher annotations</p>
           </div>
         </div>
       )}

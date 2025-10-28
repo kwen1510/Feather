@@ -467,3 +467,91 @@ export const getDatabaseStats = async () => {
     return {};
   }
 };
+
+/**
+ * Load teacher's own annotations for a specific student and question
+ * Used when teacher refreshes and needs to restore their annotations
+ * @param {string} sessionId - Current session ID
+ * @param {string} targetStudentId - Student being annotated
+ * @param {string} questionId - Current question ID
+ * @returns {Array} Array of annotation line objects
+ */
+export const loadTeacherOwnAnnotations = async (sessionId, targetStudentId, questionId) => {
+  try {
+    const db = await initDB();
+    const id = `${sessionId}-${targetStudentId}-${questionId}`;
+
+    const tx = db.transaction(STORES.TEACHER_ANNOTATIONS, 'readonly');
+    const store = tx.objectStore(STORES.TEACHER_ANNOTATIONS);
+
+    const request = store.get(id);
+
+    return new Promise((resolve, reject) => {
+      request.onsuccess = () => {
+        const result = request.result;
+        if (result) {
+          console.log('📂 Loaded teacher own annotations from IndexedDB:', id, result.annotations?.length || 0, 'lines');
+          resolve(result.annotations || []);
+        } else {
+          console.log('ℹ️ No saved teacher annotations found:', id);
+          resolve([]);
+        }
+      };
+      request.onerror = () => {
+        console.error('❌ Failed to load teacher annotations:', request.error);
+        reject(request.error);
+      };
+    });
+  } catch (error) {
+    console.error('❌ Failed to load teacher annotations:', error);
+    return [];
+  }
+};
+
+/**
+ * Clear annotations for a specific student and question
+ * Used when teacher clears canvas or moves to new question
+ * @param {string} sessionId - Current session ID
+ * @param {string} targetStudentId - Student ID
+ * @param {string} questionId - Current question ID
+ */
+export const clearTeacherAnnotations = async (sessionId, targetStudentId, questionId) => {
+  try {
+    const db = await initDB();
+    const id = `${sessionId}-${targetStudentId}-${questionId}`;
+
+    const tx = db.transaction(STORES.TEACHER_ANNOTATIONS, 'readwrite');
+    const store = tx.objectStore(STORES.TEACHER_ANNOTATIONS);
+
+    await store.delete(id);
+    console.log('🗑️ Cleared teacher annotations:', id);
+    return true;
+  } catch (error) {
+    console.error('❌ Failed to clear teacher annotations:', error);
+    return false;
+  }
+};
+
+/**
+ * Clear student work for a specific question
+ * Used when student clears canvas or moves to new question
+ * @param {string} studentId - Persistent student identifier
+ * @param {string} sessionId - Current session ID
+ * @param {string} questionId - Current question ID
+ */
+export const clearStudentWork = async (studentId, sessionId, questionId) => {
+  try {
+    const db = await initDB();
+    const id = `${studentId}-${sessionId}-${questionId}`;
+
+    const tx = db.transaction(STORES.STUDENT_WORK, 'readwrite');
+    const store = tx.objectStore(STORES.STUDENT_WORK);
+
+    await store.delete(id);
+    console.log('🗑️ Cleared student work:', id);
+    return true;
+  } catch (error) {
+    console.error('❌ Failed to clear student work:', error);
+    return false;
+  }
+};

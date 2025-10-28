@@ -12,6 +12,8 @@ import {
   loadSessionState,
   saveTeacherAnnotation,
   loadTeacherAnnotations,
+  loadTeacherOwnAnnotations,
+  clearTeacherAnnotations,
   cleanupOldSessions,
   clearSessionData
 } from '../utils/indexedDB';
@@ -761,6 +763,48 @@ const TeacherDashboard = () => {
               timestamp: Date.now(),
             });
           }, 100);
+        });
+
+        // Listen for students requesting teacher strokes (after refresh)
+        whiteboardChannel.subscribe('request-teacher-strokes', (message) => {
+          const { clientId: requestingClientId, studentId: requestingStudentId } = message.data || {};
+          console.log('📨 Received request-teacher-strokes from student:', requestingStudentId);
+
+          // Get teacher annotations for this student
+          const annotations = teacherAnnotationsRef.current?.[requestingStudentId] || [];
+
+          // Respond with teacher strokes
+          whiteboardChannel.publish('teacher-strokes-response', {
+            targetClientId: requestingClientId,
+            targetStudentId: requestingStudentId,
+            strokes: annotations,
+            timestamp: Date.now()
+          });
+
+          console.log('📤 Sent', annotations.length, 'teacher annotations to student');
+        });
+
+        // Listen for student stroke responses (after teacher refresh)
+        whiteboardChannel.subscribe('student-strokes-response', (message) => {
+          const { clientId: respondingClientId, studentId: respondingStudentId, strokes } = message.data || {};
+          console.log('📨 Received student-strokes-response from:', respondingStudentId, '-', strokes?.length || 0, 'strokes');
+
+          // Update student stroke count
+          if (respondingStudentId && strokes) {
+            setStudents(prev => {
+              const student = prev[respondingStudentId];
+              if (!student) return prev;
+
+              return {
+                ...prev,
+                [respondingStudentId]: {
+                  ...student,
+                  strokeCount: strokes.length,
+                  lastUpdate: Date.now()
+                }
+              };
+            });
+          }
         });
 
         // Enter presence with teacher role
