@@ -1,6 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import './StudentLogin.css';
+
+const FEATHER_USERNAME_KEY = 'Feather_username';
 
 function StudentLogin() {
   const [searchParams] = useSearchParams();
@@ -9,6 +11,14 @@ function StudentLogin() {
   const [name, setName] = useState('');
   const [sessionCode, setSessionCode] = useState((searchParams.get('room') || '').toUpperCase());
   const [error, setError] = useState('');
+
+  // Load saved username from localStorage on mount
+  useEffect(() => {
+    const savedUsername = localStorage.getItem(FEATHER_USERNAME_KEY);
+    if (savedUsername) {
+      setName(savedUsername);
+    }
+  }, []);
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -23,6 +33,9 @@ function StudentLogin() {
       setError('Please enter a session code');
       return;
     }
+
+    // Save username to localStorage for next time
+    localStorage.setItem(FEATHER_USERNAME_KEY, name.trim());
 
     // Navigate to student canvas with params
     navigate(`/student?room=${sessionCode.trim().toUpperCase()}&name=${encodeURIComponent(name.trim())}`);

@@ -401,6 +401,11 @@ function Student() {
         whiteboardChannel.subscribe('session-ended', (message) => {
           console.log('🛑 Session ended:', message.data?.reason);
           setSessionStatus('ended');
+
+          // Redirect to login after 3 seconds
+          setTimeout(() => {
+            navigate('/student-login');
+          }, 3000);
         });
 
         // Enter presence with student name
@@ -855,6 +860,9 @@ function Student() {
             <div className="session-icon ended">✓</div>
             <h2>Session ended</h2>
             <p>Thank you for participating! The teacher has ended this session.</p>
+            <p style={{ marginTop: '1rem', fontSize: '0.9rem', opacity: 0.8 }}>
+              Redirecting to login...
+            </p>
           </div>
         </div>
       )}
