@@ -643,25 +643,6 @@ function Student() {
     return () => clearTimeout(timer);
   }, [studentLines, channel, clientId, canvasSize, canvasScale]);
 
-  // Show confirmation dialog on refresh
-  useEffect(() => {
-    if (!channel || !clientId) return;
-
-    const handleBeforeUnload = (e) => {
-      // Show browser confirmation dialog
-      // If user clicks "Stay" → page doesn't unload → component stays mounted → connected
-      // If user clicks "Leave" → page unloads → component unmounts → cleanup runs → disconnects
-      e.preventDefault();
-      e.returnValue = '';
-      return '';
-    };
-
-    window.addEventListener('beforeunload', handleBeforeUnload);
-
-    return () => {
-      window.removeEventListener('beforeunload', handleBeforeUnload);
-    };
-  }, [channel, clientId]);
 
   // Auto-save student work to Supabase every 10 seconds
   useEffect(() => {

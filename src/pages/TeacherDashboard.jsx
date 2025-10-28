@@ -631,58 +631,6 @@ const TeacherDashboard = () => {
     };
   }, [roomId, clientId]);
 
-  // Refresh protection and session end handling
-  useEffect(() => {
-    const handleBeforeUnload = (e) => {
-      if (sessionStatus === 'active' || sessionStatus === 'created') {
-        // Show browser confirmation dialog
-        e.preventDefault();
-        e.returnValue = 'This will end the session for all students. Are you sure?';
-
-        // End session immediately (use synchronous method)
-        if (sessionId && channel) {
-          try {
-            // Publish session-ended event synchronously
-            channel.publish('session-ended', {
-              timestamp: Date.now(),
-              reason: 'teacher_refresh',
-            });
-
-            // Use sendBeacon for reliable database update on page unload
-            const endpointUrl = `${window.location.origin}/api/end-session`;
-            const data = JSON.stringify({ sessionId });
-            navigator.sendBeacon(endpointUrl, data);
-          } catch (error) {
-            console.error('Error ending session on unload:', error);
-          }
-        }
-      }
-    };
-
-    // Use pagehide for better mobile support
-    const handlePageHide = () => {
-      if (sessionStatus === 'active' || sessionStatus === 'created') {
-        if (sessionId && channel) {
-          try {
-            channel.publish('session-ended', {
-              timestamp: Date.now(),
-              reason: 'teacher_refresh',
-            });
-          } catch (error) {
-            console.error('Error ending session on pagehide:', error);
-          }
-        }
-      }
-    };
-
-    window.addEventListener('beforeunload', handleBeforeUnload);
-    window.addEventListener('pagehide', handlePageHide);
-
-    return () => {
-      window.removeEventListener('beforeunload', handleBeforeUnload);
-      window.removeEventListener('pagehide', handlePageHide);
-    };
-  }, [sessionStatus, sessionId, channel]);
 
   // Extract friendly name from clientId
   const extractStudentName = (clientId) => {
