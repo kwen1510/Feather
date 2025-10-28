@@ -47,12 +47,24 @@ function TestStudent() {
 
         const whiteboardChannel = ably.channels.get(`room-${roomId}`);
 
+        // Wait for channel to attach
+        await new Promise((resolve, reject) => {
+          whiteboardChannel.once('attached', resolve);
+          whiteboardChannel.once('failed', reject);
+          whiteboardChannel.attach();
+        });
+
+        console.log('✅ Test Student channel attached');
+
         // Enter presence
-        await whiteboardChannel.presence.enter({
+        const presenceData = {
           name: studentName,
           role: 'student',
           testMode: true
-        });
+        };
+        console.log('📍 Entering presence with data:', presenceData);
+        await whiteboardChannel.presence.enter(presenceData);
+        console.log('✅ Test Student entered presence as:', studentName);
 
         // Subscribe to student layer
         whiteboardChannel.subscribe('student-layer', (message) => {

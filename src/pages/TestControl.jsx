@@ -90,11 +90,22 @@ const TestControl = () => {
 
       // Join room
       const channel = ably.channels.get(`room-${roomCode.toUpperCase()}`);
-      await channel.presence.enter({
+
+      // Wait for channel to attach
+      await new Promise((resolve, reject) => {
+        channel.once('attached', resolve);
+        channel.once('failed', reject);
+        channel.attach();
+      });
+
+      const presenceData = {
         name: studentName,
         role: 'student',
         testMode: true,
-      });
+      };
+      console.log(`Student ${index + 1} entering presence with:`, presenceData);
+      await channel.presence.enter(presenceData);
+      console.log(`Student ${index + 1} entered presence successfully`);
 
       updateStudentStatus(index, { status: 'joined', channel, ably });
 

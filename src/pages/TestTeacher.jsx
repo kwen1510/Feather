@@ -107,10 +107,20 @@ const TestTeacher = () => {
 
         const whiteboardChannel = ablyInstance.channels.get(`room-${roomId}`);
 
+        // Wait for channel to attach
+        await new Promise((resolve, reject) => {
+          whiteboardChannel.once('attached', resolve);
+          whiteboardChannel.once('failed', reject);
+          whiteboardChannel.attach();
+        });
+
+        console.log('✅ Channel attached');
+
         // Subscribe to presence
         whiteboardChannel.presence.subscribe('enter', (member) => {
-          console.log('👤 Student entered:', member.clientId, member.data);
+          console.log('👤 Member entered:', member.clientId, 'Role:', member.data?.role, 'Data:', member.data);
           if (member.data?.role === 'student') {
+            console.log('✅ Adding student to dashboard:', member.data.name || member.clientId);
             setStudents(prev => ({
               ...prev,
               [member.clientId]: {
@@ -153,9 +163,12 @@ const TestTeacher = () => {
 
         // Get current presence members
         const members = await whiteboardChannel.presence.get();
+        console.log(`📋 Found ${members.length} members in presence`);
         const studentMembers = {};
         members.forEach(member => {
+          console.log('  - Member:', member.clientId, 'Role:', member.data?.role, 'Name:', member.data?.name);
           if (member.data?.role === 'student') {
+            console.log('    ✅ Adding existing student:', member.data.name || member.clientId);
             studentMembers[member.clientId] = {
               clientId: member.clientId,
               name: member.data.name || member.clientId,
@@ -169,6 +182,7 @@ const TestTeacher = () => {
             };
           }
         });
+        console.log(`✅ Initialized with ${Object.keys(studentMembers).length} students`);
         setStudents(studentMembers);
 
         // Subscribe to student drawings
