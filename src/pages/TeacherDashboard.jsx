@@ -639,15 +639,51 @@ const TeacherDashboard = () => {
         whiteboardChannel.presence.subscribe('enter', (member) => {
           if (member.clientId !== clientId && member.clientId.includes('student')) {
             const studentName = member.data?.name || extractStudentName(member.clientId);
+            const incomingClientId = member.clientId;
+            const incomingStudentId = member.data?.studentId;
 
             setStudents(prev => {
-              // Check if student already exists
-              if (prev[member.clientId]) {
-                // Update existing student instead of showing join toast
+              // Check if student already exists with SAME clientId (normal presence update)
+              if (prev[incomingClientId]) {
                 return {
                   ...prev,
-                  [member.clientId]: {
-                    ...prev[member.clientId],
+                  [incomingClientId]: {
+                    ...prev[incomingClientId],
+                    isActive: true,
+                    isVisible: member.data?.isVisible !== false,
+                    lastUpdate: Date.now(),
+                  }
+                };
+              }
+
+              // Check if student already exists with SAME studentId but DIFFERENT clientId (student refreshed!)
+              const existingEntry = incomingStudentId ? Object.entries(prev).find(
+                ([cId, student]) => student.studentId === incomingStudentId && cId !== incomingClientId
+              ) : null;
+
+              if (existingEntry) {
+                const [oldClientId, oldStudentData] = existingEntry;
+                console.log('🔄 Student refreshed:', oldClientId, '→', incomingClientId, '(', studentName, ')');
+
+                // Remove old entry, create new entry with transferred state
+                const { [oldClientId]: removed, ...remaining } = prev;
+
+                // Update selectedStudent if teacher has modal open with this student
+                if (selectedStudent?.clientId === oldClientId) {
+                  setSelectedStudent({
+                    ...oldStudentData,
+                    clientId: incomingClientId,
+                    studentId: incomingStudentId,
+                  });
+                }
+
+                return {
+                  ...remaining,
+                  [incomingClientId]: {
+                    ...oldStudentData,           // Transfer all state (lines, flags, etc.)
+                    clientId: incomingClientId,  // Update to new clientId
+                    studentId: incomingStudentId,
+                    name: studentName,
                     isActive: true,
                     isVisible: member.data?.isVisible !== false,
                     lastUpdate: Date.now(),
@@ -656,16 +692,16 @@ const TeacherDashboard = () => {
               }
 
               // New student - show join toast only once per session
-              if (!joinedStudentsRef.current.has(member.clientId)) {
-                joinedStudentsRef.current.add(member.clientId);
+              if (!joinedStudentsRef.current.has(incomingClientId)) {
+                joinedStudentsRef.current.add(incomingClientId);
                 showToast(`${studentName} joined`, 'success');
               }
 
               return {
                 ...prev,
-                [member.clientId]: {
-                  clientId: member.clientId,
-                  studentId: member.data?.studentId || null, // Track persistent studentId
+                [incomingClientId]: {
+                  clientId: incomingClientId,
+                  studentId: incomingStudentId || null,
                   name: studentName,
                   isActive: true,
                   isVisible: member.data?.isVisible !== false,
