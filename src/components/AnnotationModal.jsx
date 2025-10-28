@@ -79,48 +79,36 @@ const AnnotationModal = ({
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
 
-  // Load saved preferences
+  // Load saved preferences ONCE on mount
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    console.log('🟣 [TEACHER ANNOTATION] Loading preferences from localStorage...');
     try {
       const stored = localStorage.getItem(TEACHER_PREFS_KEY);
       if (stored) {
         const prefs = JSON.parse(stored);
-        console.log('🟣 [TEACHER ANNOTATION] Found stored preferences:', prefs);
-        // Check version - if old version, clear and use defaults
         if (prefs.version !== PREFS_VERSION) {
-          console.log('🟣 [TEACHER ANNOTATION] Version mismatch! Expected:', PREFS_VERSION, 'Got:', prefs.version);
-          console.log('🟣 [TEACHER ANNOTATION] Clearing old preferences...');
           localStorage.removeItem(TEACHER_PREFS_KEY);
           return;
         }
-        console.log('🟣 [TEACHER ANNOTATION] Applying preferences...');
         if (prefs.tool) setTool(prefs.tool);
         if (prefs.color) setColor(prefs.color);
         if (typeof prefs.brushSize === 'number') setBrushSize(prefs.brushSize);
         if (prefs.inputMode) setInputMode(prefs.inputMode);
         if (prefs.toolbarPosition) setToolbarPosition(prefs.toolbarPosition);
-        console.log('🟣 [TEACHER ANNOTATION] Preferences loaded successfully!');
-      } else {
-        console.log('🟣 [TEACHER ANNOTATION] No stored preferences found, using defaults');
       }
     } catch (error) {
-      console.warn('🟣 [TEACHER ANNOTATION] Failed to load teacher annotation prefs', error);
       localStorage.removeItem(TEACHER_PREFS_KEY);
     }
   }, []);
 
+  // Save preferences when they change
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    // Skip saving on first render to avoid overwriting loaded preferences
     if (isFirstRender.current) {
       isFirstRender.current = false;
-      console.log('💾 [TEACHER ANNOTATION] Skipping save on first render');
       return;
     }
     const prefs = { version: PREFS_VERSION, tool, color, brushSize, inputMode, toolbarPosition };
-    console.log('💾 [TEACHER ANNOTATION] Saving preferences to localStorage:', prefs);
     localStorage.setItem(TEACHER_PREFS_KEY, JSON.stringify(prefs));
   }, [tool, color, brushSize, inputMode, toolbarPosition]);
 

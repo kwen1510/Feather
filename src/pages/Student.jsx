@@ -90,24 +90,12 @@ function Student() {
 
   const [channel, setChannel] = useState(null);
 
-  // Generate stable clientId using crypto.randomUUID for uniqueness
-  const [clientId] = useState(() => {
-    // CRITICAL: Generate a truly unique clientId per login session
-    // Use crypto.randomUUID if available, otherwise fallback
-    let uniqueId;
-    if (typeof crypto !== 'undefined' && crypto.randomUUID) {
-      uniqueId = crypto.randomUUID();
-    } else {
-      uniqueId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-    }
-
-    const clientId = `student-${uniqueId.replace(/-/g, '').substring(0, 12)}`;
-    console.log('🆕 [STUDENT LOGIN] Generated unique clientId:', clientId, 'for', studentName);
-
-    return clientId;
-  });
+  const clientIdentityRef = useRef({ roomId: null, studentName: null, clientId: null });
+  const [clientId, setClientId] = useState(null);
 
   const [isConnected, setIsConnected] = useState(false);
+
+  const sessionInitRoomRef = useRef(null);
 
   // Supabase session tracking
   const [sessionId, setSessionId] = useState(null);
@@ -129,53 +117,62 @@ function Student() {
   const [inputMode, setInputMode] = useState('stylus-only'); // 'all' or 'stylus-only'
   const [toolbarPosition, setToolbarPosition] = useState('left'); // 'left' or 'right'
   const [isMobile, setIsMobile] = useState(isMobileDevice());
+  const visibilityListenerAttached = useRef(false);
 
-  // Redirect to login if missing name or room, or if logging out from refresh
+  // Redirect to login if missing name or room - DO THIS FIRST before any initialization
   useEffect(() => {
-    // Check if user is logging out from a refresh
-    const shouldLogout = sessionStorage.getItem('student-logout-on-load');
-    if (shouldLogout === 'true') {
-      sessionStorage.removeItem('student-logout-on-load');
-      navigate('/student-login');
-      return;
-    }
-
     if (!roomId || !studentName) {
       navigate(`/student-login${roomId ? `?room=${roomId}` : ''}`);
     }
   }, [roomId, studentName, navigate]);
 
-  // Load saved preferences
+  // Generate clientId only when we have valid room and name
   useEffect(() => {
+    if (!roomId || !studentName) return;
+
+    const currentIdentity = clientIdentityRef.current;
+    if (
+      currentIdentity.clientId &&
+      currentIdentity.roomId === roomId &&
+      currentIdentity.studentName === studentName
+    ) {
+      setClientId(currentIdentity.clientId);
+      return;
+    }
+
+    const randomPart1 = Math.random().toString(36).substring(2, 8);
+    const randomPart2 = Math.random().toString(36).substring(2, 8);
+    const timestamp = Date.now().toString(36).slice(-4);
+    const uniqueId = `${randomPart1}${randomPart2}${timestamp}`;
+    const generatedClientId = `student-${uniqueId}`;
+
+    clientIdentityRef.current = { roomId, studentName, clientId: generatedClientId };
+    setClientId(generatedClientId);
+  }, [studentName, roomId]);
+
+  // Load saved preferences only when we have valid room and name
+  useEffect(() => {
+    if (!roomId || !studentName) return;
     if (typeof window === 'undefined') return;
-    console.log('🔵 [STUDENT] Loading preferences from localStorage...');
+
     try {
       const stored = localStorage.getItem(STUDENT_PREFS_KEY);
       if (stored) {
         const prefs = JSON.parse(stored);
-        console.log('🔵 [STUDENT] Found stored preferences:', prefs);
-        // Check version - if old version, clear and use defaults
         if (prefs.version !== PREFS_VERSION) {
-          console.log('🔵 [STUDENT] Version mismatch! Expected:', PREFS_VERSION, 'Got:', prefs.version);
-          console.log('🔵 [STUDENT] Clearing old preferences...');
           localStorage.removeItem(STUDENT_PREFS_KEY);
           return;
         }
-        console.log('🔵 [STUDENT] Applying preferences...');
         if (prefs.tool) setTool(prefs.tool);
         if (prefs.color) setColor(prefs.color);
         if (typeof prefs.brushSize === 'number') setBrushSize(prefs.brushSize);
         if (prefs.inputMode) setInputMode(prefs.inputMode);
         if (prefs.toolbarPosition) setToolbarPosition(prefs.toolbarPosition);
-        console.log('🔵 [STUDENT] Preferences loaded successfully!');
-      } else {
-        console.log('🔵 [STUDENT] No stored preferences found, using defaults');
       }
     } catch (error) {
-      console.warn('🔵 [STUDENT] Failed to load student prefs', error);
       localStorage.removeItem(STUDENT_PREFS_KEY);
     }
-  }, []);
+  }, [roomId, studentName]);
 
   // Detect mobile device on mount and resize
   useEffect(() => {
@@ -196,17 +193,15 @@ function Student() {
   }, [isMobile]);
 
   useEffect(() => {
+    if (!roomId || !studentName) return;
     if (typeof window === 'undefined') return;
-    // Skip saving on first render to avoid overwriting loaded preferences
     if (isFirstRender.current) {
       isFirstRender.current = false;
-      console.log('💾 [STUDENT] Skipping save on first render');
       return;
     }
     const prefs = { version: PREFS_VERSION, tool, color, brushSize, inputMode, toolbarPosition };
-    console.log('💾 [STUDENT] Saving preferences to localStorage:', prefs);
     localStorage.setItem(STUDENT_PREFS_KEY, JSON.stringify(prefs));
-  }, [tool, color, brushSize, inputMode, toolbarPosition]);
+  }, [tool, color, brushSize, inputMode, toolbarPosition, roomId, studentName]);
 
   // Undo/redo stacks
   const undoStack = useRef([]);
@@ -290,9 +285,19 @@ function Student() {
 
   // Validate session and create participant record
   useEffect(() => {
+    if (!roomId || !studentName || !clientId) {
+      return;
+    }
+
+    if (sessionInitRoomRef.current === roomId) {
+      return;
+    }
+
+    sessionInitRoomRef.current = roomId;
+    let cancelled = false;
+
     const initializeSession = async () => {
       try {
-        console.log('📝 Student validating session for room:', roomId);
 
         // Check if session exists for this room (case-insensitive)
         const { data: sessions, error: sessionError } = await supabase
@@ -303,24 +308,35 @@ function Student() {
           .limit(1);
 
         if (sessionError) {
-          console.error('Failed to query session:', sessionError);
           setSessionStatus('ended');
           return;
         }
 
         if (!sessions || sessions.length === 0) {
-          console.log('❌ No session found for room:', roomId);
           setSessionStatus('ended');
           return;
         }
 
         const session = sessions[0];
-        console.log('✅ Session found:', session);
+        if (cancelled) return;
 
         setSessionId(session.id);
         setSessionStatus(session.status === 'active' ? 'active' : 'waiting');
 
-        // Create participant record
+        const { data: existingParticipant } = await supabase
+          .from('participants')
+          .select('*')
+          .eq('session_id', session.id)
+          .eq('client_id', clientId)
+          .maybeSingle();
+
+        if (existingParticipant) {
+          setParticipantId(existingParticipant.id);
+          return;
+        }
+
+        if (cancelled) return;
+
         const { data: participant, error: participantError } = await supabase
           .from('participants')
           .insert([
@@ -339,59 +355,63 @@ function Student() {
           return;
         }
 
-        console.log('👤 Participant created:', participant);
+        if (cancelled) return;
         setParticipantId(participant.id);
 
       } catch (error) {
         console.error('Error initializing session:', error);
         setSessionStatus('ended');
+        sessionInitRoomRef.current = null;
       }
     };
 
     initializeSession();
+    return () => {
+      cancelled = true;
+    };
   }, [roomId, clientId, studentName]);
 
   // Initialize Ably connection
   useEffect(() => {
-    console.log('🔵 [STUDENT INIT] Starting Ably initialization for', clientId, 'in room', roomId);
+    if (!roomId || !studentName || !clientId) {
+      return;
+    }
 
-    let isCleanedUp = false; // Flag to prevent operations after cleanup
+    let ablyClient = null;
+    let whiteboardChannel = null;
+    let isActive = true;
+    const channelSubscriptions = [];
 
     const initAbly = async () => {
       try {
-        if (isCleanedUp) {
-          console.log('⚠️ [STUDENT INIT] Already cleaned up, skipping');
-          return;
-        }
-
-        const ably = new Ably.Realtime({
+        ablyClient = new Ably.Realtime({
           authUrl: '/api/token',
           authParams: { clientId },
         });
 
-        ably.connection.on('connected', () => {
-          console.log('✅ [STUDENT] Connected to Ably as', clientId);
+        ablyClient.connection.on('connected', () => {
+          if (!isActive) return;
           setIsConnected(true);
         });
 
-        ably.connection.on('disconnected', () => {
-          console.log('🔴 [STUDENT] Disconnected from Ably');
+        ablyClient.connection.on('disconnected', () => {
+          if (!isActive) return;
           setIsConnected(false);
         });
 
-        const whiteboardChannel = ably.channels.get(`room-${roomId}`);
+        whiteboardChannel = ablyClient.channels.get(`room-${roomId}`);
 
-        // Listen for student layer updates
-        // NOTE: Students should NOT listen to their own messages to avoid race conditions
-        // Only the teacher needs to see student updates
-        whiteboardChannel.subscribe('student-layer', (message) => {
-          // Ignore all student-layer messages when you're a student
-          // Students maintain their own local state
-          return;
-        });
+        const subscribe = (event, handler) => {
+          whiteboardChannel.subscribe(event, handler);
+          channelSubscriptions.push({ event, handler });
+        };
+
+        // Students ignore student-layer broadcasts to avoid echo
+        subscribe('student-layer', () => {});
 
         // Listen for teacher annotations and filter by targetStudentId
-        whiteboardChannel.subscribe('teacher-annotation', (message) => {
+        subscribe('teacher-annotation', (message) => {
+          if (!isActive) return;
           if (message.data.targetStudentId === clientId) {
             isRemoteUpdate.current = true;
             setTeacherLines(message.data.annotations || []);
@@ -402,7 +422,8 @@ function Student() {
         });
 
         // Listen for teacher shared images
-        whiteboardChannel.subscribe('teacher-image', (message) => {
+        subscribe('teacher-image', (message) => {
+          if (!isActive) return;
           setSharedImage({
             dataUrl: message.data?.dataUrl,
             width: message.data?.width,
@@ -412,130 +433,133 @@ function Student() {
         });
 
         // Listen for teacher templates
-        whiteboardChannel.subscribe('teacher-template', (message) => {
+        subscribe('teacher-template', (message) => {
+          if (!isActive) return;
           setSharedImage({
             dataUrl: message.data?.dataUrl,
             width: message.data?.width,
             height: message.data?.height,
-            type: message.data?.type, // hanzi, graph-corner, graph-cross
+            type: message.data?.type,
             timestamp: message.data?.timestamp,
           });
         });
 
         // Listen for teacher clear command
-        whiteboardChannel.subscribe('teacher-clear', (message) => {
+        subscribe('teacher-clear', () => {
+          if (!isActive) return;
           setSharedImage(null);
         });
 
         // Listen for question state sync (when joining/rejoining)
-        whiteboardChannel.subscribe('sync-question-state', (message) => {
+        subscribe('sync-question-state', (message) => {
+          if (!isActive) return;
           if (message.data.targetClientId === clientId) {
-            console.log('📥 Received current question state');
             setSharedImage(message.data.content);
           }
         });
 
         // Listen for clear all drawings command (when teacher sends new content)
-        whiteboardChannel.subscribe('clear-all-drawings', (message) => {
-          console.log('📝 Clearing all drawings (teacher sent new content)');
+        subscribe('clear-all-drawings', (message) => {
+          if (!isActive) return;
 
-          // Track the new question
           if (message.data?.questionId) {
             setCurrentQuestionId(message.data.questionId);
           }
 
           isRemoteUpdate.current = true;
-          setStudentLines([]); // Clear student's own drawings
-          setTeacherLines([]); // Clear teacher annotations
+          setStudentLines([]);
+          setTeacherLines([]);
           setTimeout(() => {
             isRemoteUpdate.current = false;
           }, 100);
         });
 
         // Listen for session started
-        whiteboardChannel.subscribe('session-started', (message) => {
-          console.log('🎉 Session started!');
+        subscribe('session-started', () => {
+          if (!isActive) return;
           setSessionStatus('active');
         });
 
         // Listen for session ended
-        whiteboardChannel.subscribe('session-ended', (message) => {
-          console.log('🛑 Session ended:', message.data?.reason);
+        subscribe('session-ended', () => {
+          if (!isActive) return;
           setSessionStatus('ended');
-
-          // Redirect to login immediately
           navigate('/student-login');
         });
 
         // Enter presence with student name and initial visibility status
-        console.log('📥 [STUDENT PRESENCE] Entering presence as', studentName, 'with clientId', clientId);
         await whiteboardChannel.presence.enter({
           name: studentName,
           isVisible: !document.hidden
         });
-        console.log('✅ [STUDENT PRESENCE] Successfully joined room', roomId, 'as', studentName);
 
-        if (isCleanedUp) {
-          console.log('⚠️ [STUDENT INIT] Cleaned up during init, leaving presence');
-          await whiteboardChannel.presence.leave();
-          ably.close();
+        if (!isActive) {
+          await whiteboardChannel.presence.leaveClient(clientId);
+          ablyClient.close();
           return;
         }
 
         setChannel(whiteboardChannel);
 
-        // Request current question state after joining (in case we're joining mid-session)
+        // Request current question state after joining
         setTimeout(() => {
-          if (!isCleanedUp) {
-            whiteboardChannel.publish('request-current-state', {
-              clientId: clientId,
-              timestamp: Date.now(),
-            });
-            console.log('📞 [STUDENT] Requested current question state from teacher');
-          }
-        }, 1000); // Wait 1 second to ensure all subscriptions are set up
-
-        return () => {
-          console.log('🧹 [STUDENT CLEANUP] Starting cleanup for', clientId);
-          isCleanedUp = true;
-
-          // Leave presence before closing connection
-          if (whiteboardChannel) {
-            whiteboardChannel.presence.leave().then(() => {
-              console.log('👋 [STUDENT CLEANUP] Left presence as', clientId);
-              ably.close();
-            }).catch((err) => {
-              console.error('❌ [STUDENT CLEANUP] Error leaving presence:', err);
-              ably.close();
-            });
-          } else {
-            ably.close();
-          }
-        };
+          if (!isActive) return;
+          whiteboardChannel.publish('request-current-state', {
+            clientId: clientId,
+            timestamp: Date.now(),
+          });
+        }, 1000);
       } catch (error) {
-        console.error('❌ [STUDENT INIT] Failed to initialize Ably:', error);
+        console.error('Failed to initialize Ably:', error);
       }
     };
 
     initAbly();
-  }, [clientId, roomId, studentName]);
+
+    return () => {
+      isActive = false;
+
+      // Always cleanup on unmount (which only happens on actual page unload)
+      if (whiteboardChannel) {
+        channelSubscriptions.forEach(({ event, handler }) => {
+          whiteboardChannel.unsubscribe(event, handler);
+        });
+
+        try {
+          whiteboardChannel.presence.leaveClient(clientId);
+        } catch (error) {
+          console.error('Error leaving presence:', error);
+        }
+      }
+
+      setChannel(null);
+
+      if (ablyClient) {
+        try {
+          ablyClient.close();
+        } catch (error) {
+          console.error('Error closing Ably:', error);
+        }
+      }
+    };
+  }, [clientId, roomId, studentName, navigate]);
 
   // Track tab visibility and notify teacher
   useEffect(() => {
-    if (!channel) return;
+    // Prevent duplicate listeners in React Strict Mode
+    if (!channel || visibilityListenerAttached.current) return;
+
+    visibilityListenerAttached.current = true;
 
     const handleVisibilityChange = () => {
       const isVisible = !document.hidden;
-      console.log(`👁️ Tab visibility changed: ${isVisible ? 'visible' : 'hidden'}`);
 
-      // Update presence with visibility status
       channel.presence.update({
         name: studentName,
         isVisible: isVisible,
         lastVisibilityChange: Date.now()
       });
 
-      // Publish event for immediate notification (both hide AND show)
       channel.publish('student-visibility', {
         clientId: clientId,
         studentName: studentName,
@@ -544,10 +568,10 @@ function Student() {
       });
     };
 
-    // Listen for visibility changes (tab switch, minimize, etc.)
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
+      visibilityListenerAttached.current = false;
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, [channel, clientId, studentName]);
@@ -600,67 +624,42 @@ function Student() {
 
   // Sync student lines to Ably
   useEffect(() => {
-    if (!isRemoteUpdate.current && channel) {
-      const timer = setTimeout(() => {
-        channel.publish('student-layer', {
-          lines: studentLines,
-          clientId,
-          meta: {
-            base: BASE_CANVAS,
-            display: canvasSize,
-            scale: canvasScale,
-          },
-        });
-        console.log('Published student layer:', studentLines.length, 'lines');
-      }, 150);
-      return () => clearTimeout(timer);
+    if (!clientId || !channel || isRemoteUpdate.current) {
+      return;
     }
+
+    const timer = setTimeout(() => {
+      channel.publish('student-layer', {
+        lines: studentLines,
+        clientId,
+        meta: {
+          base: BASE_CANVAS,
+          display: canvasSize,
+          scale: canvasScale,
+        },
+      });
+    }, 150);
+
+    return () => clearTimeout(timer);
   }, [studentLines, channel, clientId, canvasSize, canvasScale]);
 
-  // Handle page refresh - confirm and logout
+  // Show confirmation dialog on refresh
   useEffect(() => {
-    if (!channel) return;
+    if (!channel || !clientId) return;
 
     const handleBeforeUnload = (e) => {
-      console.log('🚪 [STUDENT] Page unload - cleaning up');
-
-      // Immediately leave presence to avoid duplicate sessions
-      try {
-        channel.presence.leaveClient(clientId);
-      } catch (error) {
-        console.error('❌ [STUDENT] Error leaving presence on unload:', error);
-      }
-
-      // Set logout flag
-      sessionStorage.setItem('student-logout-on-load', 'true');
-
       // Show browser confirmation dialog
+      // If user clicks "Stay" → page doesn't unload → component stays mounted → connected
+      // If user clicks "Leave" → page unloads → component unmounts → cleanup runs → disconnects
       e.preventDefault();
-      e.returnValue = 'Are you sure you want to leave? You will be logged out.';
-      return e.returnValue;
-    };
-
-    // Use pagehide for better mobile support (iOS Safari, iPad)
-    const handlePageHide = (e) => {
-      console.log('📱 [STUDENT] Page hide event - cleaning up session');
-
-      // Immediately leave presence
-      try {
-        channel.presence.leaveClient(clientId);
-      } catch (error) {
-        console.error('❌ [STUDENT] Error leaving presence on pagehide:', error);
-      }
-
-      // Set logout flag
-      sessionStorage.setItem('student-logout-on-load', 'true');
+      e.returnValue = '';
+      return '';
     };
 
     window.addEventListener('beforeunload', handleBeforeUnload);
-    window.addEventListener('pagehide', handlePageHide);
 
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload);
-      window.removeEventListener('pagehide', handlePageHide);
     };
   }, [channel, clientId]);
 
@@ -701,8 +700,6 @@ function Student() {
 
           if (updateError) {
             console.error('Failed to update annotation:', updateError);
-          } else {
-            console.log('💾 Auto-saved student work');
           }
         } else {
           // Create new annotation
@@ -712,8 +709,6 @@ function Student() {
 
           if (insertError) {
             console.error('Failed to create annotation:', insertError);
-          } else {
-            console.log('💾 Created new annotation');
           }
         }
       } catch (error) {
@@ -759,8 +754,6 @@ function Student() {
             .from('annotations')
             .insert([annotationData]);
         }
-
-        console.log('💾 Saved work for new question');
       } catch (error) {
         console.error('Error saving on question change:', error);
       }
@@ -950,11 +943,13 @@ function Student() {
           scale: canvasScale,
         },
       });
-      console.log('Published student clear');
     }
   };
 
   const getShortClientId = () => {
+    if (!clientId) {
+      return '---';
+    }
     return clientId.split('-')[1]?.substring(0, 3) || clientId;
   };
 
@@ -965,6 +960,7 @@ function Student() {
   const toggleToolbarPosition = () => {
     setToolbarPosition((prev) => (prev === 'left' ? 'right' : 'left'));
   };
+
 
   const formatClientLabel = () => {
     const displayName = studentName && studentName !== 'Anonymous' ? studentName : getShortClientId();

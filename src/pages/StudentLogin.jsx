@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { supabase } from '../supabaseClient';
 import './StudentLogin.css';
 
 const FEATHER_USERNAME_KEY = 'Feather_username';
@@ -10,17 +9,22 @@ function StudentLogin() {
   const navigate = useNavigate();
 
   const [name, setName] = useState('');
-  const [sessionCode, setSessionCode] = useState((searchParams.get('room') || '').toUpperCase());
+  const [sessionCode, setSessionCode] = useState('');
   const [error, setError] = useState('');
   const [isChecking, setIsChecking] = useState(false);
 
-  // Load saved username from localStorage on mount
+  // Load username from localStorage and session code from URL on mount - that's it!
   useEffect(() => {
     const savedUsername = localStorage.getItem(FEATHER_USERNAME_KEY);
     if (savedUsername) {
       setName(savedUsername);
     }
-  }, []);
+
+    const roomFromUrl = searchParams.get('room');
+    if (roomFromUrl) {
+      setSessionCode(roomFromUrl.toUpperCase());
+    }
+  }, [searchParams]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -39,28 +43,24 @@ function StudentLogin() {
     setIsChecking(true);
     setError('');
 
-    // Ping teacher channel to check if session is active
-    // This is more reliable than checking Supabase
-    try {
-      console.log('🔍 [STUDENT LOGIN] Pinging teacher channel:', sessionCode.trim().toUpperCase());
+    // Save username immediately when login is clicked
+    localStorage.setItem(FEATHER_USERNAME_KEY, name.trim());
 
+    // Try to connect to teacher - if it pings back, log in
+    try {
       const Ably = (await import('ably/promises')).default;
       const ably = new Ably.Realtime({
         authUrl: '/api/token',
         authParams: { clientId: `ping-${Date.now()}` },
       });
 
-      // Wait for connection
+      // Wait for connection with timeout
       await new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => {
-          reject(new Error('Connection timeout'));
-        }, 10000);
-
+        const timeout = setTimeout(() => reject(new Error('Connection timeout')), 8000);
         ably.connection.once('connected', () => {
           clearTimeout(timeout);
           resolve();
         });
-
         ably.connection.once('failed', () => {
           clearTimeout(timeout);
           reject(new Error('Connection failed'));
@@ -68,29 +68,22 @@ function StudentLogin() {
       });
 
       const channel = ably.channels.get(`room-${sessionCode.trim().toUpperCase()}`);
-
-      // Check if teacher is present
       const members = await channel.presence.get();
-      console.log('👥 [STUDENT LOGIN] Found', members.length, 'members in channel');
-
       const teacherPresent = members.some(member => member.clientId.startsWith('teacher-'));
 
       ably.close();
 
       if (!teacherPresent) {
-        setError('No active teacher found. Please check your session code or ask your teacher to start the session.');
+        setError('No active teacher found. Please check your session code.');
         setIsChecking(false);
         return;
       }
 
-      console.log('✅ [STUDENT LOGIN] Teacher is present, allowing login');
-
-      // Teacher is present, save username and navigate
-      localStorage.setItem(FEATHER_USERNAME_KEY, name.trim());
+      // Navigate to student page
       navigate(`/student?room=${sessionCode.trim().toUpperCase()}&name=${encodeURIComponent(name.trim())}`);
     } catch (err) {
-      console.error('❌ [STUDENT LOGIN] Error checking teacher presence:', err);
-      setError('Failed to connect to session. Please check your internet connection and try again.');
+      console.error('Failed to connect:', err);
+      setError('Failed to connect to session. Please try again.');
       setIsChecking(false);
     }
   };
