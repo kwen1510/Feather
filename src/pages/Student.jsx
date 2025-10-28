@@ -437,10 +437,8 @@ function Student() {
           console.log('🛑 Session ended:', message.data?.reason);
           setSessionStatus('ended');
 
-          // Redirect to login after 3 seconds
-          setTimeout(() => {
-            navigate('/student-login');
-          }, 3000);
+          // Redirect to login immediately
+          navigate('/student-login');
         });
 
         // Enter presence with student name and initial visibility status

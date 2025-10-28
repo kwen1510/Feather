@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { supabase } from '../supabaseClient';
 import './StudentLogin.css';
 
 const FEATHER_USERNAME_KEY = 'Feather_username';
@@ -11,6 +12,7 @@ function StudentLogin() {
   const [name, setName] = useState('');
   const [sessionCode, setSessionCode] = useState((searchParams.get('room') || '').toUpperCase());
   const [error, setError] = useState('');
+  const [isChecking, setIsChecking] = useState(false);
 
   // Load saved username from localStorage on mount
   useEffect(() => {
@@ -20,7 +22,7 @@ function StudentLogin() {
     }
   }, []);
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
 
     // Validation
@@ -34,11 +36,37 @@ function StudentLogin() {
       return;
     }
 
-    // Save username to localStorage for next time
-    localStorage.setItem(FEATHER_USERNAME_KEY, name.trim());
+    // Check if session exists and is active
+    setIsChecking(true);
+    setError('');
 
-    // Navigate to student canvas with params
-    navigate(`/student?room=${sessionCode.trim().toUpperCase()}&name=${encodeURIComponent(name.trim())}`);
+    try {
+      const { data: session, error: sessionError } = await supabase
+        .from('sessions')
+        .select('id, status, room_code')
+        .eq('room_code', sessionCode.trim().toUpperCase())
+        .single();
+
+      if (sessionError || !session) {
+        setError('Session does not exist. Please check your session code.');
+        setIsChecking(false);
+        return;
+      }
+
+      if (session.status === 'ended') {
+        setError('This session has ended. Please contact your teacher.');
+        setIsChecking(false);
+        return;
+      }
+
+      // Session is valid, save username and navigate
+      localStorage.setItem(FEATHER_USERNAME_KEY, name.trim());
+      navigate(`/student?room=${sessionCode.trim().toUpperCase()}&name=${encodeURIComponent(name.trim())}`);
+    } catch (err) {
+      console.error('Error checking session:', err);
+      setError('Failed to verify session. Please try again.');
+      setIsChecking(false);
+    }
   };
 
   return (
@@ -81,8 +109,8 @@ function StudentLogin() {
 
           {error && <div className="login-error">{error}</div>}
 
-          <button type="submit" className="join-button">
-            Join Session
+          <button type="submit" className="join-button" disabled={isChecking}>
+            {isChecking ? 'Checking session...' : 'Join Session'}
           </button>
         </form>
       </div>

@@ -293,21 +293,25 @@ const TeacherDashboard = () => {
             const studentName = member.data?.name || extractStudentName(member.clientId);
             console.log('👋 Student joined:', member.clientId, 'Name:', studentName);
 
-            // Show toast notification
-            showToast(`${studentName} joined`, 'success');
-
-            setStudents(prev => ({
-              ...prev,
-              [member.clientId]: {
-                ...(prev[member.clientId] || {}),
-                clientId: member.clientId,
-                name: studentName,
-                isActive: true,
-                isVisible: member.data?.isVisible !== false, // Default to true
-                lastUpdate: Date.now(),
-                isFlagged: prev[member.clientId]?.isFlagged || false,
+            setStudents(prev => {
+              // Only show toast if this is a NEW student (prevent duplicate notifications)
+              if (!prev[member.clientId]) {
+                showToast(`${studentName} joined`, 'success');
               }
-            }));
+
+              return {
+                ...prev,
+                [member.clientId]: {
+                  ...(prev[member.clientId] || {}),
+                  clientId: member.clientId,
+                  name: studentName,
+                  isActive: true,
+                  isVisible: member.data?.isVisible !== false, // Default to true
+                  lastUpdate: Date.now(),
+                  isFlagged: prev[member.clientId]?.isFlagged || false,
+                }
+              };
+            });
 
             // Send current question state to the newly joined student
             setTimeout(() => {
@@ -406,6 +410,38 @@ const TeacherDashboard = () => {
 
         // Enter presence
         await whiteboardChannel.presence.enter();
+
+        // Load existing students who are already in the room
+        // This prevents duplicates when teacher refreshes
+        const existingMembers = await whiteboardChannel.presence.get();
+        console.log(`📋 Found ${existingMembers.length} existing members`);
+
+        existingMembers.forEach(member => {
+          if (member.clientId !== clientId && member.clientId.includes('student')) {
+            const studentName = member.data?.name || extractStudentName(member.clientId);
+            console.log('👋 Loading existing student:', member.clientId, 'Name:', studentName);
+
+            setStudents(prev => {
+              // Only add if not already present (prevent duplicates)
+              if (prev[member.clientId]) {
+                return prev; // Already exists, don't add again
+              }
+
+              return {
+                ...prev,
+                [member.clientId]: {
+                  clientId: member.clientId,
+                  name: studentName,
+                  isActive: true,
+                  isVisible: member.data?.isVisible !== false,
+                  lastUpdate: Date.now(),
+                  isFlagged: false,
+                  lines: [],
+                }
+              };
+            });
+          }
+        });
 
         setChannel(whiteboardChannel);
 
@@ -1010,14 +1046,15 @@ const TeacherDashboard = () => {
     }
   };
 
-  // Get student array sorted by most recent activity
+  // Get student array sorted alphabetically by name
   const getStudentsList = () => {
     return Object.values(students).sort((a, b) => {
-      // Active students first
-      if (a.isActive && !b.isActive) return -1;
-      if (!a.isActive && b.isActive) return 1;
-      // Then by most recent update
-      return (b.lastUpdate || 0) - (a.lastUpdate || 0);
+      // Get student names, fallback to clientId if no name
+      const nameA = (a.name || a.clientId || '').toLowerCase();
+      const nameB = (b.name || b.clientId || '').toLowerCase();
+
+      // Alphabetical sorting (00_xxx before 01_yyy, Ace before Andy)
+      return nameA.localeCompare(nameB);
     });
   };
 
