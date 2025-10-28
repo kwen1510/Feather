@@ -302,6 +302,7 @@ const TeacherDashboard = () => {
                 clientId: member.clientId,
                 name: studentName,
                 isActive: true,
+                isVisible: member.data?.isVisible !== false, // Default to true
                 lastUpdate: Date.now(),
                 isFlagged: prev[member.clientId]?.isFlagged || false,
               }
@@ -336,6 +337,44 @@ const TeacherDashboard = () => {
               const { [member.clientId]: removed, ...remaining } = prev;
               return remaining;
             });
+          }
+        });
+
+        // Listen for presence updates (visibility changes)
+        whiteboardChannel.presence.subscribe('update', (member) => {
+          if (member.clientId !== clientId && member.clientId.includes('student')) {
+            const isVisible = member.data?.isVisible !== false;
+            console.log(`👁️ Student visibility update: ${member.clientId} - ${isVisible ? 'visible' : 'hidden'}`);
+
+            setStudents(prev => ({
+              ...prev,
+              [member.clientId]: {
+                ...(prev[member.clientId] || {}),
+                isVisible: isVisible,
+                lastVisibilityChange: Date.now(),
+              }
+            }));
+          }
+        });
+
+        // Listen for student visibility events (immediate notifications)
+        whiteboardChannel.subscribe('student-visibility', (message) => {
+          const { clientId: studentClientId, studentName, isVisible } = message.data;
+          console.log(`👁️ Student visibility event: ${studentName} - ${isVisible ? 'visible' : 'hidden'}`);
+
+          // Update student state
+          setStudents(prev => ({
+            ...prev,
+            [studentClientId]: {
+              ...(prev[studentClientId] || {}),
+              isVisible: isVisible,
+              lastVisibilityChange: Date.now(),
+            }
+          }));
+
+          // Show notification when student switches away
+          if (!isVisible) {
+            showToast(`⚠️ ${studentName} switched away from the tab`, 'warning');
           }
         });
 

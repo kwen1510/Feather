@@ -443,8 +443,11 @@ function Student() {
           }, 3000);
         });
 
-        // Enter presence with student name
-        await whiteboardChannel.presence.enter({ name: studentName });
+        // Enter presence with student name and initial visibility status
+        await whiteboardChannel.presence.enter({
+          name: studentName,
+          isVisible: !document.hidden
+        });
         console.log(`Joined room ${roomId} as ${studentName}`);
 
         setChannel(whiteboardChannel);
@@ -479,6 +482,72 @@ function Student() {
 
     initAbly();
   }, [clientId, roomId]);
+
+  // Track tab visibility and notify teacher
+  useEffect(() => {
+    if (!channel) return;
+
+    const handleVisibilityChange = () => {
+      const isVisible = !document.hidden;
+      console.log(`👁️ Tab visibility changed: ${isVisible ? 'visible' : 'hidden'}`);
+
+      // Update presence with visibility status
+      channel.presence.update({
+        name: studentName,
+        isVisible: isVisible,
+        lastVisibilityChange: Date.now()
+      });
+
+      // Also publish an event for immediate notification
+      channel.publish('student-visibility', {
+        clientId: clientId,
+        studentName: studentName,
+        isVisible: isVisible,
+        timestamp: Date.now()
+      });
+    };
+
+    // Listen for visibility changes (tab switch, minimize, etc.)
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    // Also track window focus/blur as additional signal
+    const handleBlur = () => {
+      if (!document.hidden) {
+        // Window lost focus but tab is still visible
+        console.log('🔷 Window blur detected');
+        channel.publish('student-visibility', {
+          clientId: clientId,
+          studentName: studentName,
+          isVisible: false,
+          reason: 'blur',
+          timestamp: Date.now()
+        });
+      }
+    };
+
+    const handleFocus = () => {
+      if (!document.hidden) {
+        // Window regained focus
+        console.log('🔶 Window focus detected');
+        channel.publish('student-visibility', {
+          clientId: clientId,
+          studentName: studentName,
+          isVisible: true,
+          reason: 'focus',
+          timestamp: Date.now()
+        });
+      }
+    };
+
+    window.addEventListener('blur', handleBlur);
+    window.addEventListener('focus', handleFocus);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('blur', handleBlur);
+      window.removeEventListener('focus', handleFocus);
+    };
+  }, [channel, clientId, studentName]);
 
   // Responsive canvas sizing (preserve 4:3 aspect)
   useEffect(() => {

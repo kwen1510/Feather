@@ -131,6 +131,14 @@ const StudentCard = ({ student, onClick, onToggleFlag, teacherAnnotations = [], 
           </button>
           <div className="student-status">
             <span className={`status-dot ${student.isActive ? 'online' : 'offline'}`}></span>
+            {student.isVisible === false && student.isActive && (
+              <span
+                className="visibility-indicator away"
+                title="Student switched away from tab"
+              >
+                👁️‍🗨️
+              </span>
+            )}
           </div>
         </div>
       </div>
