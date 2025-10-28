@@ -3,6 +3,7 @@ import { useSearchParams, useNavigate } from 'react-router-dom';
 import { Stage, Layer, Line, Image as KonvaImage } from 'react-konva';
 import * as Ably from 'ably';
 import { supabase } from '../supabaseClient';
+import { Pen, Eraser, Undo, Redo, Trash2 } from 'lucide-react';
 import './StudentNew.css';
 
 const BASE_CANVAS = { width: 800, height: 600 };
@@ -10,6 +11,12 @@ const MIN_SCALE = 0.65;
 const MAX_SCALE = 2.2;
 const STUDENT_PREFS_KEY = 'studentCanvasPrefs';
 const PREFS_VERSION = 2; // Increment when adding new preferences
+
+// Mobile detection utility
+const isMobileDevice = () => {
+  return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
+    || window.innerWidth <= 768;
+};
 
 // Component to display shared image as background
 const SharedImageLayer = ({ sharedImage, canvasWidth, canvasHeight }) => {
@@ -92,6 +99,7 @@ function Student() {
   const [isDrawing, setIsDrawing] = useState(false);
   const [inputMode, setInputMode] = useState('stylus-only'); // 'all' or 'stylus-only'
   const [toolbarPosition, setToolbarPosition] = useState('left'); // 'left' or 'right'
+  const [isMobile, setIsMobile] = useState(isMobileDevice());
 
   // Redirect to login if missing name or room, or if logging out from refresh
   useEffect(() => {
@@ -139,6 +147,24 @@ function Student() {
       localStorage.removeItem(STUDENT_PREFS_KEY);
     }
   }, []);
+
+  // Detect mobile device on mount and resize
+  useEffect(() => {
+    const handleResize = () => {
+      setIsMobile(isMobileDevice());
+    };
+
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  // Set input mode to 'all' on mobile devices
+  useEffect(() => {
+    if (isMobile) {
+      setInputMode('all');
+      setBrushSize(3); // Fixed brush size for mobile
+    }
+  }, [isMobile]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -885,24 +911,101 @@ function Student() {
             <p>{formatClientLabel()}</p>
           </div>
           <div className="student-status-actions">
-            <div className="tool-status-indicator">
-              <span className="tool-status-text">
-                <i className={tool === 'pen' ? 'pi pi-pencil' : 'pi pi-eraser'}></i> {inputMode === 'all' ? 'All inputs' : 'Stylus only'}
-              </span>
-            </div>
-            <div className={`connection-pill ${connectionStateClass}`} aria-live="polite">
-              <span className="connection-indicator-dot" />
-              <span>{connectionLabel}</span>
-            </div>
-            <button className="move-toolbar-btn" onClick={toggleToolbarPosition}>
-              Move toolbar to {toolbarPosition === 'left' ? 'right' : 'left'}
-            </button>
+            {!isMobile && (
+              <>
+                <div className="tool-status-indicator">
+                  <span className="tool-status-text">
+                    <i className={tool === 'pen' ? 'pi pi-pencil' : 'pi pi-eraser'}></i> {inputMode === 'all' ? 'All inputs' : 'Stylus only'}
+                  </span>
+                </div>
+                <div className={`connection-pill ${connectionStateClass}`} aria-live="polite">
+                  <span className="connection-indicator-dot" />
+                  <span>{connectionLabel}</span>
+                </div>
+                <button className="move-toolbar-btn" onClick={toggleToolbarPosition}>
+                  Move toolbar to {toolbarPosition === 'left' ? 'right' : 'left'}
+                </button>
+              </>
+            )}
+            {isMobile && (
+              <div className={`connection-pill ${connectionStateClass}`} aria-live="polite">
+                <span className="connection-indicator-dot" />
+                <span>{connectionLabel}</span>
+              </div>
+            )}
           </div>
         </div>
 
-        <div className={`student-workspace ${toolbarPosition === 'right' ? 'toolbar-right' : ''}`}>
-          {/* Sidebar */}
-          <div className="student-sidebar">
+        <div className={`student-workspace ${toolbarPosition === 'right' ? 'toolbar-right' : ''} ${isMobile ? 'mobile-view' : ''}`}>
+          {/* Mobile Toolbar - Compact horizontal layout */}
+          {isMobile ? (
+            <div className="mobile-toolbar">
+              {/* Horizontal color buttons */}
+              <div className="mobile-colors">
+                <button
+                  onClick={() => setColor('black')}
+                  className={`mobile-color-button ${color === 'black' ? 'active' : ''}`}
+                  style={{ background: 'black' }}
+                  aria-label="Black"
+                />
+                <button
+                  onClick={() => setColor('#0066FF')}
+                  className={`mobile-color-button ${color === '#0066FF' ? 'active' : ''}`}
+                  style={{ background: '#0066FF' }}
+                  aria-label="Blue"
+                />
+                <button
+                  onClick={() => setColor('#00AA00')}
+                  className={`mobile-color-button ${color === '#00AA00' ? 'active' : ''}`}
+                  style={{ background: '#00AA00' }}
+                  aria-label="Green"
+                />
+              </div>
+
+              {/* Tool and action buttons */}
+              <div className="mobile-tools">
+                <button
+                  onClick={() => setTool('pen')}
+                  className={`mobile-tool-button ${tool === 'pen' ? 'active' : ''}`}
+                  aria-label="Pen"
+                >
+                  <Pen size={20} />
+                </button>
+                <button
+                  onClick={() => setTool('eraser')}
+                  className={`mobile-tool-button ${tool === 'eraser' ? 'active' : ''}`}
+                  aria-label="Eraser"
+                >
+                  <Eraser size={20} />
+                </button>
+                <button
+                  onClick={handleUndo}
+                  className="mobile-tool-button"
+                  disabled={undoStack.current.length === 0}
+                  aria-label="Undo"
+                >
+                  <Undo size={20} />
+                </button>
+                <button
+                  onClick={handleRedo}
+                  className="mobile-tool-button"
+                  disabled={redoStack.current.length === 0}
+                  aria-label="Redo"
+                >
+                  <Redo size={20} />
+                </button>
+                <button
+                  onClick={handleClear}
+                  className="mobile-tool-button danger"
+                  aria-label="Clear"
+                >
+                  <Trash2 size={20} />
+                </button>
+              </div>
+            </div>
+          ) : (
+            /* Desktop Sidebar - Vertical layout */
+            <div className="student-sidebar">
             {/* Colors */}
             <div className="sidebar-section">
               <h3 className="sidebar-label">COLORS</h3>
@@ -1003,6 +1106,7 @@ function Student() {
             </div>
           </div>
           </div>
+          )}
 
           {/* Canvas */}
           <div className="student-canvas-panel" ref={canvasWrapperRef}>

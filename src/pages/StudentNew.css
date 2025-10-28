@@ -995,3 +995,150 @@
   color: #64748b;
   line-height: 1.6;
 }
+
+/* ========================================
+   MOBILE-SPECIFIC STYLES
+   ======================================== */
+
+/* Mobile Toolbar - Horizontal compact layout */
+.mobile-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  background: rgba(255, 255, 255, 0.98);
+  border-radius: 1rem;
+  border: 1px solid #d8efe6;
+  box-shadow: 0 4px 12px rgba(15, 118, 110, 0.1);
+  width: 100%;
+  box-sizing: border-box;
+}
+
+/* Horizontal color buttons */
+.mobile-colors {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: center;
+  align-items: center;
+}
+
+.mobile-color-button {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 3px solid transparent;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
+}
+
+.mobile-color-button.active {
+  border-color: #0f9d83;
+  transform: scale(1.15);
+  box-shadow: 0 4px 8px rgba(15, 157, 131, 0.3);
+}
+
+.mobile-color-button:active {
+  transform: scale(0.95);
+}
+
+/* Tool and action buttons */
+.mobile-tools {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: center;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.mobile-tool-button {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  border: 2px solid #d8efe6;
+  background: #ffffff;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #64748b;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08);
+}
+
+.mobile-tool-button.active {
+  background: #0f9d83;
+  border-color: #0f9d83;
+  color: #ffffff;
+  transform: scale(1.05);
+  box-shadow: 0 4px 8px rgba(15, 157, 131, 0.3);
+}
+
+.mobile-tool-button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.mobile-tool-button:not(:disabled):active {
+  transform: scale(0.95);
+}
+
+.mobile-tool-button.danger {
+  border-color: #ef4444;
+  color: #ef4444;
+}
+
+.mobile-tool-button.danger:active:not(:disabled) {
+  background: #ef4444;
+  color: #ffffff;
+}
+
+/* Mobile workspace adjustments */
+.student-workspace.mobile-view {
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.student-workspace.mobile-view .student-canvas-panel {
+  flex: 1;
+  min-height: 0;
+}
+
+/* Mobile status bar adjustments */
+@media (max-width: 768px) {
+  .student-canvas-page {
+    padding: 0.5rem;
+  }
+
+  .student-canvas-container {
+    border-radius: 1.5rem;
+    padding: 0.75rem;
+    max-height: none;
+    height: calc(100vh - 1rem);
+  }
+
+  .student-status-bar {
+    gap: 0.5rem;
+  }
+
+  .student-status-text h1 {
+    font-size: 1.1rem;
+  }
+
+  .student-status-text p {
+    font-size: 0.85rem;
+  }
+
+  .connection-pill {
+    font-size: 0.75rem;
+    padding: 0.35rem 0.65rem;
+  }
+
+  .student-canvas-panel {
+    border-radius: 1rem;
+  }
+
+  .student-canvas-frame {
+    border-radius: 0.75rem;
+  }
+}
