@@ -158,6 +158,12 @@ function Student() {
   const redoStack = useRef([]);
   const isFirstRender = useRef(true);
 
+  // Ref to always access latest studentLines in auto-save
+  const studentLinesRef = useRef(studentLines);
+  useEffect(() => {
+    studentLinesRef.current = studentLines;
+  }, [studentLines]);
+
   const isRemoteUpdate = useRef(false);
   const eraserStateSaved = useRef(false);
 
@@ -506,14 +512,19 @@ function Student() {
           .select('id')
           .eq('question_id', currentQuestionId)
           .eq('participant_id', participantId)
-          .single();
+          .maybeSingle(); // Use maybeSingle() instead of single() to avoid 406 error
 
         const annotationData = {
           session_id: sessionId,
           question_id: currentQuestionId,
           participant_id: participantId,
-          student_lines: studentLines,
+          student_lines: studentLinesRef.current, // Use ref to get latest lines
         };
+
+        if (queryError) {
+          console.error('Failed to query annotation:', queryError);
+          return;
+        }
 
         if (existing) {
           // Update existing annotation
@@ -544,14 +555,53 @@ function Student() {
       }
     };
 
-    // Save immediately when question changes
-    autoSave();
-
-    // Then save every 10 seconds
+    // Save every 10 seconds (don't save immediately to avoid excessive saves)
     const interval = setInterval(autoSave, 10000);
 
     return () => clearInterval(interval);
-  }, [studentLines, sessionId, participantId, currentQuestionId, sessionStatus]);
+  }, [sessionId, participantId, currentQuestionId, sessionStatus]); // Removed studentLines from deps
+
+  // Separate effect to save immediately when question changes
+  useEffect(() => {
+    if (!sessionId || !participantId || !currentQuestionId || sessionStatus !== 'active') {
+      return;
+    }
+
+    const saveOnQuestionChange = async () => {
+      try {
+        const { data: existing } = await supabase
+          .from('annotations')
+          .select('id')
+          .eq('question_id', currentQuestionId)
+          .eq('participant_id', participantId)
+          .maybeSingle();
+
+        const annotationData = {
+          session_id: sessionId,
+          question_id: currentQuestionId,
+          participant_id: participantId,
+          student_lines: studentLines,
+        };
+
+        if (existing) {
+          await supabase
+            .from('annotations')
+            .update(annotationData)
+            .eq('id', existing.id);
+        } else {
+          await supabase
+            .from('annotations')
+            .insert([annotationData]);
+        }
+
+        console.log('💾 Saved work for new question');
+      } catch (error) {
+        console.error('Error saving on question change:', error);
+      }
+    };
+
+    saveOnQuestionChange();
+  }, [currentQuestionId]); // Only run when question changes
 
   const isAllowedPointerEvent = (evt) => {
     if (inputMode !== 'stylus-only') return true;
