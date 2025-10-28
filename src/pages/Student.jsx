@@ -1020,6 +1020,21 @@ function Student() {
           <div className="student-status-text">
             <h1>Student Canvas</h1>
             <p>{formatClientLabel()}</p>
+            {roomId && (
+              <div className="session-code-badge" style={{
+                marginTop: '0.5rem',
+                padding: '0.25rem 0.75rem',
+                background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                color: 'white',
+                borderRadius: '12px',
+                fontSize: '0.85rem',
+                fontWeight: '600',
+                letterSpacing: '0.5px',
+                display: 'inline-block'
+              }}>
+                Session: {roomId}
+              </div>
+            )}
           </div>
           <div className="student-status-actions">
             {!isMobile && (
