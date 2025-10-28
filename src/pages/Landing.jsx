@@ -184,7 +184,7 @@ function Landing() {
             <p className="workspace-label">PICK YOUR WORKSPACE</p>
             <div className="workspace-cards">
               <a
-                onClick={() => navigate('/teacher?room=demo')}
+                onClick={() => navigate('/teacher')}
                 className="glass-button teacher-card"
               >
                 <div>
@@ -196,7 +196,7 @@ function Landing() {
                 <span className="workspace-emoji">👩‍🏫</span>
               </a>
               <a
-                onClick={() => setShowStudentLogin(true)}
+                onClick={() => navigate('/student-login')}
                 className="glass-button student-card"
               >
                 <div>
