@@ -38,6 +38,7 @@ const AnnotationModal = ({
   const eraserStateSaved = useRef(false);
   const prevStudentIdRef = useRef(null);
   const isFirstRender = useRef(true);
+  const scrollPositionRef = useRef(0);
 
   // Performance optimization: keep current line in ref to avoid re-renders
   const currentLineRef = useRef(null);
@@ -140,66 +141,78 @@ const AnnotationModal = ({
 
   // Prevent body scrolling and touch events when modal is open
   useEffect(() => {
-    if (isOpen) {
-      // Save original body overflow
-      const originalOverflow = document.body.style.overflow;
-      const originalPosition = document.body.style.position;
-      const originalTouchAction = document.body.style.touchAction;
+    if (!isOpen) return;
 
-      // Prevent scrolling
-      document.body.style.overflow = 'hidden';
-      document.body.style.position = 'fixed';
-      document.body.style.width = '100%';
-      document.body.style.touchAction = 'none';
+    // Save original body styles
+    const originalOverflow = document.body.style.overflow;
+    const originalPosition = document.body.style.position;
+    const originalTouchAction = document.body.style.touchAction;
+    const originalWidth = document.body.style.width;
+    const originalTop = document.body.style.top;
 
-      const canvasFrame = canvasFrameRef.current;
-      if (!canvasFrame) return;
+    // Lock scroll and remember current position
+    const scrollY = window.scrollY || document.documentElement.scrollTop || 0;
+    scrollPositionRef.current = scrollY;
+    document.body.style.overflow = 'hidden';
+    document.body.style.position = 'fixed';
+    document.body.style.width = '100%';
+    document.body.style.top = `-${scrollY}px`;
+    document.body.style.touchAction = 'none';
 
-      // Prevent touch events and gestures ONLY on canvas area, not buttons
-      const preventTouch = (e) => {
-        // Only prevent if the touch is on the canvas area, not on buttons/sidebar
-        const target = e.target;
-        const isButton = target.closest('button') || target.closest('.annotation-sidebar') || target.closest('.annotation-status-actions');
+    const canvasFrame = canvasFrameRef.current;
 
-        if (!isButton) {
-          e.preventDefault();
-        }
-      };
+    // Prevent touch events and gestures ONLY on canvas area, not buttons
+    const preventTouch = (e) => {
+      // Only prevent if the touch is on the canvas area, not on buttons/sidebar
+      const target = e.target;
+      const isButton = target.closest('button') || target.closest('.annotation-sidebar') || target.closest('.annotation-status-actions');
 
-      const preventGesture = (e) => {
+      if (!isButton) {
         e.preventDefault();
-      };
+      }
+    };
 
-      const preventSelection = (e) => {
-        if (isDrawing) {
-          e.preventDefault();
-          return false;
-        }
-      };
+    const preventGesture = (e) => {
+      e.preventDefault();
+    };
 
+    const preventSelection = (e) => {
+      if (isDrawing) {
+        e.preventDefault();
+        return false;
+      }
+    };
+
+    if (canvasFrame) {
       // Add listeners to canvas frame only, not entire document
       canvasFrame.addEventListener('touchstart', preventTouch, { passive: false });
       canvasFrame.addEventListener('touchmove', preventTouch, { passive: false });
       canvasFrame.addEventListener('gesturestart', preventGesture, { passive: false });
       canvasFrame.addEventListener('gesturechange', preventGesture, { passive: false });
-      document.addEventListener('selectstart', preventSelection);
-
-      return () => {
-        // Restore original styles
-        document.body.style.overflow = originalOverflow;
-        document.body.style.position = originalPosition;
-        document.body.style.touchAction = originalTouchAction;
-
-        // Remove event listeners
-        if (canvasFrame) {
-          canvasFrame.removeEventListener('touchstart', preventTouch);
-          canvasFrame.removeEventListener('touchmove', preventTouch);
-          canvasFrame.removeEventListener('gesturestart', preventGesture);
-          canvasFrame.removeEventListener('gesturechange', preventGesture);
-        }
-        document.removeEventListener('selectstart', preventSelection);
-      };
     }
+    document.addEventListener('selectstart', preventSelection);
+
+    return () => {
+      // Restore original styles
+      document.body.style.overflow = originalOverflow;
+      document.body.style.position = originalPosition;
+      document.body.style.width = originalWidth;
+      document.body.style.top = originalTop;
+      document.body.style.touchAction = originalTouchAction;
+
+      if (canvasFrame) {
+        canvasFrame.removeEventListener('touchstart', preventTouch);
+        canvasFrame.removeEventListener('touchmove', preventTouch);
+        canvasFrame.removeEventListener('gesturestart', preventGesture);
+        canvasFrame.removeEventListener('gesturechange', preventGesture);
+      }
+      document.removeEventListener('selectstart', preventSelection);
+
+      // Restore saved scroll position (with delay to ensure body styles are restored first)
+      requestAnimationFrame(() => {
+        window.scrollTo(0, scrollPositionRef.current);
+      });
+    };
   }, [isOpen, isDrawing]);
 
   useEffect(() => {

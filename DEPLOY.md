@@ -320,6 +320,35 @@ The script will:
 - Rebuild frontend
 - Restart the backend
 
+### Automated Push + Deploy (optional)
+
+For a single command that stages, commits, pushes, and triggers the server deploy:
+
+```bash
+chmod +x scripts/auto-deploy.sh   # run once
+./scripts/auto-deploy.sh "Add new feature"
+```
+
+The script defaults to `root@146.190.100.142` and `/var/www/whiteboard/Feather`. Override these via environment variables before running:
+
+```bash
+DEPLOY_REMOTE_USER=deployer \
+DEPLOY_REMOTE_HOST=your.droplet.ip \
+DEPLOY_REMOTE_PATH=/var/www/whiteboard/Feather \
+./scripts/auto-deploy.sh "Deploy feature"
+```
+
+It will prompt for a commit message if you omit one, skip the commit when no changes are staged, and still push + redeploy so you can roll out already-pushed code.
+
+### Environment Backup
+
+`Feather/deploy.sh` now copies the live `.env` to `/etc/whiteboard/.env` on every run and restores it automatically if the repo copy goes missing. Update the `ENV_BACKUP` path in the script if you prefer another location. To recover a lost `.env` manually, either recreate it from `.env.example` or copy your backup back into the project directory:
+
+```bash
+cp /etc/whiteboard/.env /var/www/whiteboard/.env
+sudo ./Feather/deploy.sh
+```
+
 ### Viewing Logs
 
 **Application logs:**

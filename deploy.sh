@@ -11,6 +11,7 @@ echo "============================================"
 echo ""
 
 APP_DIR="/var/www/whiteboard"
+ENV_BACKUP="/etc/whiteboard/.env"
 
 # Check if running as root
 if [ "$EUID" -ne 0 ]; then
@@ -28,7 +29,7 @@ fi
 cd $APP_DIR
 
 # Pull latest changes (if using git)
-echo "[1/8] Pulling latest changes from Git..."
+echo "[1/9] Pulling latest changes from Git..."
 if [ -d ".git" ]; then
     git pull origin main || git pull origin master
 else
@@ -36,22 +37,31 @@ else
 fi
 
 # Install dependencies
-echo "[2/8] Installing dependencies..."
-npm install --production
+echo "[2/9] Installing dependencies..."
+npm install
 
 # Build the frontend
-echo "[3/8] Building frontend..."
+echo "[3/9] Building frontend..."
 npm run build
+npm prune --production
 
-# Check if .env exists
+echo "[4/9] Validating environment configuration..."
 if [ ! -f "$APP_DIR/.env" ]; then
-    echo "Warning: .env file not found!"
-    echo "Please copy .env.example to .env and configure it"
-    exit 1
+    if [ -f "$ENV_BACKUP" ]; then
+        echo "Restoring .env from backup..."
+        cp "$ENV_BACKUP" "$APP_DIR/.env"
+    else
+        echo "Warning: .env file not found!"
+        echo "Please copy .env.example to .env and configure it"
+        exit 1
+    fi
 fi
 
+mkdir -p "$(dirname "$ENV_BACKUP")"
+cp "$APP_DIR/.env" "$ENV_BACKUP"
+
 # Copy nginx configuration
-echo "[4/8] Configuring Nginx..."
+echo "[5/9] Configuring Nginx..."
 if [ -f "$APP_DIR/nginx.conf" ]; then
     cp $APP_DIR/nginx.conf /etc/nginx/sites-available/whiteboard
 
@@ -72,19 +82,19 @@ else
 fi
 
 # PM2 will use ecosystem.config.js in the current directory
-echo "[5/8] Verifying PM2 configuration..."
+echo "[6/9] Verifying PM2 configuration..."
 if [ ! -f "$APP_DIR/ecosystem.config.js" ]; then
     echo "Warning: ecosystem.config.js not found!"
     exit 1
 fi
 
 # Restart Nginx
-echo "[6/8] Restarting Nginx..."
+echo "[7/9] Restarting Nginx..."
 systemctl restart nginx
 systemctl enable nginx
 
 # Start/Restart PM2 application
-echo "[7/8] Starting application with PM2..."
+echo "[8/9] Starting application with PM2..."
 cd $APP_DIR
 
 # Stop existing PM2 process if running
@@ -98,7 +108,7 @@ pm2 start ecosystem.config.js --env production
 pm2 save
 
 # Show PM2 status
-echo "[8/8] Application status..."
+echo "[9/9] Application status..."
 pm2 status
 
 echo ""
