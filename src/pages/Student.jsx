@@ -283,6 +283,14 @@ function Student() {
     [canvasSize.width]
   );
 
+  // Refs to access latest canvas size and scale in Ably connection handlers
+  const canvasSizeRef = useRef(canvasSize);
+  const canvasScaleRef = useRef(canvasScale);
+  useEffect(() => {
+    canvasSizeRef.current = canvasSize;
+    canvasScaleRef.current = canvasScale;
+  }, [canvasSize, canvasScale]);
+
   // Validate session and create participant record
   useEffect(() => {
     if (!roomId || !studentName || !clientId) {
@@ -390,6 +398,7 @@ function Student() {
     let ablyClient = null;
     let whiteboardChannel = null;
     let isActive = true;
+    let hasInitiallyConnected = false;
     const channelSubscriptions = [];
 
     const initAbly = async () => {
@@ -399,9 +408,55 @@ function Student() {
           authParams: { clientId },
         });
 
-        ablyClient.connection.on('connected', () => {
+        ablyClient.connection.on('connected', async () => {
           if (!isActive) return;
           setIsConnected(true);
+
+          // Handle reconnection after initial connection
+          if (hasInitiallyConnected && whiteboardChannel) {
+            console.log('🔄 Reconnected - re-entering presence and syncing state');
+            try {
+              // Re-enter presence
+              await whiteboardChannel.presence.enter({
+                name: studentName,
+                isVisible: !document.hidden
+              });
+              console.log('✅ Re-entered presence as:', studentName);
+
+              // Resend current drawing state if student has drawn anything
+              const currentLines = studentLinesRef.current;
+              if (currentLines && currentLines.length > 0) {
+                console.log('🔄 Resending student drawing state:', currentLines.length, 'lines');
+                await whiteboardChannel.publish('student-layer', {
+                  lines: currentLines,
+                  clientId,
+                  name: studentName,
+                  meta: {
+                    base: BASE_CANVAS,
+                    display: canvasSizeRef.current,
+                    scale: canvasScaleRef.current,
+                  },
+                });
+                console.log('✅ Drawing state resent');
+              } else {
+                console.log('ℹ️ No drawing state to resend');
+              }
+
+              // Request current question state
+              setTimeout(() => {
+                if (!isActive) return;
+                console.log('🔄 Requesting current question state');
+                whiteboardChannel.publish('request-current-state', {
+                  clientId: clientId,
+                  timestamp: Date.now(),
+                });
+              }, 500);
+            } catch (error) {
+              console.error('❌ Error during reconnection:', error);
+            }
+          } else {
+            hasInitiallyConnected = true;
+          }
         });
 
         ablyClient.connection.on('disconnected', () => {
