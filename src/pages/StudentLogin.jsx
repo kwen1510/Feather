@@ -36,35 +36,61 @@ function StudentLogin() {
       return;
     }
 
-    // Check if session exists and is active
     setIsChecking(true);
     setError('');
 
+    // Ping teacher channel to check if session is active
+    // This is more reliable than checking Supabase
     try {
-      const { data: session, error: sessionError } = await supabase
-        .from('sessions')
-        .select('id, status, room_code')
-        .eq('room_code', sessionCode.trim().toUpperCase())
-        .single();
+      console.log('🔍 [STUDENT LOGIN] Pinging teacher channel:', sessionCode.trim().toUpperCase());
 
-      if (sessionError || !session) {
-        setError('Session does not exist. Please check your session code.');
+      const Ably = (await import('ably/promises')).default;
+      const ably = new Ably.Realtime({
+        authUrl: '/api/token',
+        authParams: { clientId: `ping-${Date.now()}` },
+      });
+
+      // Wait for connection
+      await new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          reject(new Error('Connection timeout'));
+        }, 10000);
+
+        ably.connection.once('connected', () => {
+          clearTimeout(timeout);
+          resolve();
+        });
+
+        ably.connection.once('failed', () => {
+          clearTimeout(timeout);
+          reject(new Error('Connection failed'));
+        });
+      });
+
+      const channel = ably.channels.get(`room-${sessionCode.trim().toUpperCase()}`);
+
+      // Check if teacher is present
+      const members = await channel.presence.get();
+      console.log('👥 [STUDENT LOGIN] Found', members.length, 'members in channel');
+
+      const teacherPresent = members.some(member => member.clientId.startsWith('teacher-'));
+
+      ably.close();
+
+      if (!teacherPresent) {
+        setError('No active teacher found. Please check your session code or ask your teacher to start the session.');
         setIsChecking(false);
         return;
       }
 
-      if (session.status === 'ended') {
-        setError('This session has ended. Please contact your teacher.');
-        setIsChecking(false);
-        return;
-      }
+      console.log('✅ [STUDENT LOGIN] Teacher is present, allowing login');
 
-      // Session is valid, save username and navigate
+      // Teacher is present, save username and navigate
       localStorage.setItem(FEATHER_USERNAME_KEY, name.trim());
       navigate(`/student?room=${sessionCode.trim().toUpperCase()}&name=${encodeURIComponent(name.trim())}`);
     } catch (err) {
-      console.error('Error checking session:', err);
-      setError('Failed to verify session. Please try again.');
+      console.error('❌ [STUDENT LOGIN] Error checking teacher presence:', err);
+      setError('Failed to connect to session. Please check your internet connection and try again.');
       setIsChecking(false);
     }
   };

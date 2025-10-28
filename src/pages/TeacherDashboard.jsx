@@ -419,8 +419,12 @@ const TeacherDashboard = () => {
           }, 100);
         });
 
-        // Enter presence
-        await whiteboardChannel.presence.enter();
+        // Enter presence with teacher role
+        await whiteboardChannel.presence.enter({
+          role: 'teacher',
+          timestamp: Date.now()
+        });
+        console.log('✅ [TEACHER] Entered presence in room', roomId);
 
         // Load existing students who are already in the room
         const existingMembers = await whiteboardChannel.presence.get();
