@@ -496,15 +496,13 @@ function Student() {
         lastVisibilityChange: Date.now()
       });
 
-      // Also publish an event for immediate notification (only on hide, not on show)
-      if (!isVisible) {
-        channel.publish('student-visibility', {
-          clientId: clientId,
-          studentName: studentName,
-          isVisible: false,
-          timestamp: Date.now()
-        });
-      }
+      // Publish event for immediate notification (both hide AND show)
+      channel.publish('student-visibility', {
+        clientId: clientId,
+        studentName: studentName,
+        isVisible: isVisible,
+        timestamp: Date.now()
+      });
     };
 
     // Listen for visibility changes (tab switch, minimize, etc.)

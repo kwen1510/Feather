@@ -291,24 +291,38 @@ const TeacherDashboard = () => {
         whiteboardChannel.presence.subscribe('enter', (member) => {
           if (member.clientId !== clientId && member.clientId.includes('student')) {
             const studentName = member.data?.name || extractStudentName(member.clientId);
-            console.log('👋 Student joined:', member.clientId, 'Name:', studentName);
+            console.log('🟢 [PRESENCE ENTER]', member.clientId, 'Name:', studentName);
 
             setStudents(prev => {
-              // Only show toast if this is a NEW student (prevent duplicate notifications)
-              if (!prev[member.clientId]) {
-                showToast(`${studentName} joined`, 'success');
+              // Check if student already exists
+              if (prev[member.clientId]) {
+                console.log('⚠️ [DUPLICATE ENTER] Student already exists:', member.clientId);
+                // Update existing student instead of showing join toast
+                return {
+                  ...prev,
+                  [member.clientId]: {
+                    ...prev[member.clientId],
+                    isActive: true,
+                    isVisible: member.data?.isVisible !== false,
+                    lastUpdate: Date.now(),
+                  }
+                };
               }
+
+              // New student - show join toast
+              console.log('✅ [NEW STUDENT] Adding:', member.clientId);
+              showToast(`${studentName} joined`, 'success');
 
               return {
                 ...prev,
                 [member.clientId]: {
-                  ...(prev[member.clientId] || {}),
                   clientId: member.clientId,
                   name: studentName,
                   isActive: true,
-                  isVisible: member.data?.isVisible !== false, // Default to true
+                  isVisible: member.data?.isVisible !== false,
                   lastUpdate: Date.now(),
-                  isFlagged: prev[member.clientId]?.isFlagged || false,
+                  isFlagged: false,
+                  lines: [],
                 }
               };
             });
@@ -323,19 +337,25 @@ const TeacherDashboard = () => {
                 });
                 console.log('📤 Sent current question state to', member.clientId);
               }
-            }, 500); // Small delay to ensure student is ready to receive
+            }, 500);
           }
         });
 
         whiteboardChannel.presence.subscribe('leave', (member) => {
           if (member.clientId !== clientId && member.clientId.includes('student')) {
-            console.log('👋 Student left:', member.clientId);
+            console.log('🔴 [PRESENCE LEAVE]', member.clientId);
 
             setStudents(prev => {
+              // Check if student exists before removing
+              if (!prev[member.clientId]) {
+                console.log('⚠️ [DUPLICATE LEAVE] Student not found:', member.clientId);
+                return prev;
+              }
+
               const student = prev[member.clientId];
               const studentName = student?.name || extractStudentName(member.clientId);
 
-              // Show toast notification
+              console.log('✅ [REMOVE STUDENT]', member.clientId, 'Name:', studentName);
               showToast(`${studentName} left`, 'info');
 
               // Remove the student card entirely
@@ -350,20 +370,27 @@ const TeacherDashboard = () => {
           const { clientId: studentClientId, studentName, isVisible } = message.data;
           console.log(`👁️ Student visibility event: ${studentName} - ${isVisible ? 'visible' : 'hidden'}`);
 
-          // Update student state
-          setStudents(prev => ({
-            ...prev,
-            [studentClientId]: {
-              ...(prev[studentClientId] || {}),
-              isVisible: isVisible,
-              lastVisibilityChange: Date.now(),
-            }
-          }));
+          // Check previous state before updating
+          setStudents(prev => {
+            const wasInactive = prev[studentClientId]?.isVisible === false;
 
-          // Show notification when student switches away (only if they were previously active)
-          if (!isVisible) {
-            showToast(`⚠️ ${studentName} switched away`, 'warning');
-          }
+            // Show notification based on visibility change
+            if (!isVisible) {
+              showToast(`⚠️ ${studentName} switched away`, 'warning');
+            } else if (wasInactive) {
+              // Only show "returned" toast if they were previously away
+              showToast(`✓ ${studentName} returned`, 'success');
+            }
+
+            return {
+              ...prev,
+              [studentClientId]: {
+                ...(prev[studentClientId] || {}),
+                isVisible: isVisible,
+                lastVisibilityChange: Date.now(),
+              }
+            };
+          });
         });
 
         // Listen for teacher shared images
@@ -396,7 +423,7 @@ const TeacherDashboard = () => {
 
         // Load existing students who are already in the room
         const existingMembers = await whiteboardChannel.presence.get();
-        console.log(`📋 Found ${existingMembers.length} existing members`);
+        console.log(`📋 [INIT] Found ${existingMembers.length} presence members`);
 
         // Build fresh student list from current presence members
         const currentStudents = {};
@@ -404,6 +431,7 @@ const TeacherDashboard = () => {
         // Keep any bot students from previous state
         Object.keys(students).forEach(key => {
           if (key.startsWith('bot-')) {
+            console.log('🤖 [INIT] Preserving bot:', key);
             currentStudents[key] = students[key];
           }
         });
@@ -412,7 +440,7 @@ const TeacherDashboard = () => {
         existingMembers.forEach(member => {
           if (member.clientId !== clientId && member.clientId.includes('student')) {
             const studentName = member.data?.name || extractStudentName(member.clientId);
-            console.log('👋 Loading existing student:', member.clientId, 'Name:', studentName);
+            console.log('📥 [INIT] Loading student:', member.clientId, 'Name:', studentName);
 
             currentStudents[member.clientId] = {
               clientId: member.clientId,
@@ -426,6 +454,7 @@ const TeacherDashboard = () => {
           }
         });
 
+        console.log(`✅ [INIT] Setting ${Object.keys(currentStudents).length} students`);
         setStudents(currentStudents);
 
         setChannel(whiteboardChannel);
@@ -597,11 +626,13 @@ const TeacherDashboard = () => {
       return;
     }
 
+    console.log('📤 [TEACHER] Uploading image:', file.name, file.type, file.size);
+
     setIsUploadingImage(true);
-    setImageMessage('');
+    setImageMessage('Processing image...');
 
     try {
-      const { dataUrl, width, height } = await resizeAndCompressImage(file);
+      const { dataUrl, width, height, size } = await resizeAndCompressImage(file);
       const payload = {
         dataUrl,
         width,
@@ -610,10 +641,12 @@ const TeacherDashboard = () => {
         timestamp: Date.now(),
       };
       setStagedImage(payload);
-      setImageMessage('Image ready to send.');
+      console.log('✅ [TEACHER] Image ready:', width, 'x', height, 'Final size:', size);
+      setImageMessage(`Image ready (${width}×${height}, ${Math.round(size/1024)}KB)`);
     } catch (error) {
-      console.error('Failed to upload image from dashboard:', error);
-      setImageMessage('Upload failed. Please try again.');
+      console.error('❌ [TEACHER] Image upload failed:', error);
+      setImageMessage(`Upload failed: ${error.message || 'Unknown error'}. Try a different image.`);
+      showToast('Image upload failed', 'error');
     } finally {
       setIsUploadingImage(false);
     }
