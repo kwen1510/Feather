@@ -479,13 +479,19 @@ function Student() {
     const updateCanvasSize = () => {
       if (!canvasWrapperRef.current) return;
       const rect = canvasWrapperRef.current.getBoundingClientRect();
-      const padding = 48;
-      const availableWidth = Math.max(320, rect.width - padding);
-      const availableHeight = Math.max(240, rect.height - padding);
+
+      // Use smaller padding on mobile for better space utilization
+      const padding = isMobile ? 16 : 48;
+
+      const availableWidth = Math.max(280, rect.width - padding);
+      const availableHeight = Math.max(210, rect.height - padding);
       const widthScale = availableWidth / BASE_CANVAS.width;
       const heightScale = availableHeight / BASE_CANVAS.height;
       const rawScale = Math.min(widthScale, heightScale);
-      const clampedScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, rawScale));
+
+      // Allow smaller scaling on mobile (min 0.35 instead of 0.65)
+      const minScale = isMobile ? 0.35 : MIN_SCALE;
+      const clampedScale = Math.max(minScale, Math.min(MAX_SCALE, rawScale));
       const snappedScale = Math.round(clampedScale * 20) / 20; // increments of 0.05 for nice integers
 
       setCanvasSize({
@@ -509,7 +515,7 @@ function Student() {
         resizeObserver.disconnect();
       }
     };
-  }, [toolbarPosition]);
+  }, [toolbarPosition, isMobile]);
 
   // Sync student lines to Ably
   useEffect(() => {

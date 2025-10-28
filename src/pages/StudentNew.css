@@ -1160,10 +1160,17 @@
     border-radius: 0.75rem;
     height: 100%;
     max-height: 100%;
+    padding: 0.5rem;
   }
 
   .student-canvas-surface {
     max-width: 100%;
     max-height: 100%;
+    border-radius: 0.5rem;
+  }
+
+  /* Ensure canvas container uses full available space */
+  .student-canvas-panel {
+    padding: 0;
   }
 }
