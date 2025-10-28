@@ -345,23 +345,6 @@ const TeacherDashboard = () => {
           }
         });
 
-        // Listen for presence updates (visibility changes)
-        whiteboardChannel.presence.subscribe('update', (member) => {
-          if (member.clientId !== clientId && member.clientId.includes('student')) {
-            const isVisible = member.data?.isVisible !== false;
-            console.log(`👁️ Student visibility update: ${member.clientId} - ${isVisible ? 'visible' : 'hidden'}`);
-
-            setStudents(prev => ({
-              ...prev,
-              [member.clientId]: {
-                ...(prev[member.clientId] || {}),
-                isVisible: isVisible,
-                lastVisibilityChange: Date.now(),
-              }
-            }));
-          }
-        });
-
         // Listen for student visibility events (immediate notifications)
         whiteboardChannel.subscribe('student-visibility', (message) => {
           const { clientId: studentClientId, studentName, isVisible } = message.data;
@@ -377,9 +360,9 @@ const TeacherDashboard = () => {
             }
           }));
 
-          // Show notification when student switches away
+          // Show notification when student switches away (only if they were previously active)
           if (!isVisible) {
-            showToast(`⚠️ ${studentName} switched away from the tab`, 'warning');
+            showToast(`⚠️ ${studentName} switched away`, 'warning');
           }
         });
 
@@ -412,47 +395,38 @@ const TeacherDashboard = () => {
         await whiteboardChannel.presence.enter();
 
         // Load existing students who are already in the room
-        // Clear non-bot students first to prevent stale data
-        setStudents(prev => {
-          const clearedStudents = {};
-          // Keep only bot students
-          Object.keys(prev).forEach(key => {
-            if (key.startsWith('bot-')) {
-              clearedStudents[key] = prev[key];
-            }
-          });
-          return clearedStudents;
-        });
-
         const existingMembers = await whiteboardChannel.presence.get();
         console.log(`📋 Found ${existingMembers.length} existing members`);
 
+        // Build fresh student list from current presence members
+        const currentStudents = {};
+
+        // Keep any bot students from previous state
+        Object.keys(students).forEach(key => {
+          if (key.startsWith('bot-')) {
+            currentStudents[key] = students[key];
+          }
+        });
+
+        // Add all real students from presence
         existingMembers.forEach(member => {
           if (member.clientId !== clientId && member.clientId.includes('student')) {
             const studentName = member.data?.name || extractStudentName(member.clientId);
             console.log('👋 Loading existing student:', member.clientId, 'Name:', studentName);
 
-            setStudents(prev => {
-              // Only add if not already present (prevent duplicates)
-              if (prev[member.clientId]) {
-                return prev; // Already exists, don't add again
-              }
-
-              return {
-                ...prev,
-                [member.clientId]: {
-                  clientId: member.clientId,
-                  name: studentName,
-                  isActive: true,
-                  isVisible: member.data?.isVisible !== false,
-                  lastUpdate: Date.now(),
-                  isFlagged: false,
-                  lines: [],
-                }
-              };
-            });
+            currentStudents[member.clientId] = {
+              clientId: member.clientId,
+              name: studentName,
+              isActive: true,
+              isVisible: member.data?.isVisible !== false,
+              lastUpdate: Date.now(),
+              isFlagged: false,
+              lines: [],
+            };
           }
         });
+
+        setStudents(currentStudents);
 
         setChannel(whiteboardChannel);
 
@@ -805,7 +779,12 @@ const TeacherDashboard = () => {
   };
 
   const handleSendToClass = async () => {
-    if (!channel || !sessionId) return;
+    if (!channel || !sessionId) {
+      console.error('Cannot send: channel or sessionId missing', { channel: !!channel, sessionId });
+      setImageMessage('Error: Not connected properly. Please refresh the page.');
+      showToast('Failed to send: Connection issue', 'error');
+      return;
+    }
 
     try {
       // If this is the first content being sent, start the session

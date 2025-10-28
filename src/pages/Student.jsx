@@ -496,54 +496,22 @@ function Student() {
         lastVisibilityChange: Date.now()
       });
 
-      // Also publish an event for immediate notification
-      channel.publish('student-visibility', {
-        clientId: clientId,
-        studentName: studentName,
-        isVisible: isVisible,
-        timestamp: Date.now()
-      });
+      // Also publish an event for immediate notification (only on hide, not on show)
+      if (!isVisible) {
+        channel.publish('student-visibility', {
+          clientId: clientId,
+          studentName: studentName,
+          isVisible: false,
+          timestamp: Date.now()
+        });
+      }
     };
 
     // Listen for visibility changes (tab switch, minimize, etc.)
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
-    // Also track window focus/blur as additional signal
-    const handleBlur = () => {
-      if (!document.hidden) {
-        // Window lost focus but tab is still visible
-        console.log('🔷 Window blur detected');
-        channel.publish('student-visibility', {
-          clientId: clientId,
-          studentName: studentName,
-          isVisible: false,
-          reason: 'blur',
-          timestamp: Date.now()
-        });
-      }
-    };
-
-    const handleFocus = () => {
-      if (!document.hidden) {
-        // Window regained focus
-        console.log('🔶 Window focus detected');
-        channel.publish('student-visibility', {
-          clientId: clientId,
-          studentName: studentName,
-          isVisible: true,
-          reason: 'focus',
-          timestamp: Date.now()
-        });
-      }
-    };
-
-    window.addEventListener('blur', handleBlur);
-    window.addEventListener('focus', handleFocus);
-
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
-      window.removeEventListener('blur', handleBlur);
-      window.removeEventListener('focus', handleFocus);
     };
   }, [channel, clientId, studentName]);
 
