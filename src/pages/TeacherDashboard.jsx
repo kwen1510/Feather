@@ -93,6 +93,7 @@ const TeacherDashboard = () => {
   const [sharedImage, setSharedImage] = useState(null); // Shared image sent to all students
   const sharedImageRef = useRef(null); // Ref to access latest sharedImage in callbacks
   const imageInputRef = useRef(null);
+  const linkInputRef = useRef(null); // Ref for the student link input field
   const [showQRModal, setShowQRModal] = useState(false);
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState('');
   const [toasts, setToasts] = useState([]);
@@ -892,12 +893,44 @@ const TeacherDashboard = () => {
 
   const handleCopyLink = async () => {
     const studentUrl = `${window.location.origin}/student?room=${roomId}`;
+
+    // Try modern Clipboard API first (works on HTTPS)
+    if (navigator.clipboard && window.isSecureContext) {
+      try {
+        await navigator.clipboard.writeText(studentUrl);
+        alert('Link copied to clipboard!');
+        return;
+      } catch (error) {
+        console.error('Clipboard API failed:', error);
+      }
+    }
+
+    // Fallback for HTTP: use legacy method
     try {
-      await navigator.clipboard.writeText(studentUrl);
-      alert('Link copied to clipboard!');
+      const input = linkInputRef.current;
+      if (input) {
+        input.select();
+        input.setSelectionRange(0, 99999); // For mobile devices
+
+        // Try legacy execCommand
+        const successful = document.execCommand('copy');
+        if (successful) {
+          alert('Link copied to clipboard!');
+          // Deselect
+          window.getSelection().removeAllRanges();
+        } else {
+          throw new Error('execCommand failed');
+        }
+      } else {
+        throw new Error('Input ref not available');
+      }
     } catch (error) {
-      console.error('Failed to copy link:', error);
-      alert('Failed to copy link. Please copy manually.');
+      console.error('Fallback copy failed:', error);
+      // Select the text so user can manually copy
+      if (linkInputRef.current) {
+        linkInputRef.current.select();
+      }
+      alert('Please copy the selected link manually (Ctrl+C or Cmd+C)');
     }
   };
 
@@ -1291,6 +1324,7 @@ const TeacherDashboard = () => {
                 </p>
                 <div className="qr-link-box">
                   <input
+                    ref={linkInputRef}
                     type="text"
                     value={`${window.location.origin}/student?room=${roomId}`}
                     readOnly
