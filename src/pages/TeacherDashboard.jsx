@@ -412,7 +412,18 @@ const TeacherDashboard = () => {
         await whiteboardChannel.presence.enter();
 
         // Load existing students who are already in the room
-        // This prevents duplicates when teacher refreshes
+        // Clear non-bot students first to prevent stale data
+        setStudents(prev => {
+          const clearedStudents = {};
+          // Keep only bot students
+          Object.keys(prev).forEach(key => {
+            if (key.startsWith('bot-')) {
+              clearedStudents[key] = prev[key];
+            }
+          });
+          return clearedStudents;
+        });
+
         const existingMembers = await whiteboardChannel.presence.get();
         console.log(`📋 Found ${existingMembers.length} existing members`);
 
@@ -1113,9 +1124,9 @@ const TeacherDashboard = () => {
           <div className="hero-top">
             <div className="hero-copy">
               <p className="eyebrow">Teacher dashboard</p>
-              <h1>Monitor every student's canvas and annotate live with the shared toolbar.</h1>
+              <h1>Monitor and annotate student canvases live</h1>
               <p className="hero-subtitle">
-                Share the session code below to invite students. You'll see their canvases appear in real time as they connect.
+                Share the session code to invite students. Their canvases appear in real time as they connect.
               </p>
             </div>
             <div className="session-info">
@@ -1123,13 +1134,6 @@ const TeacherDashboard = () => {
                 <span className="pill-label">Session code</span>
                 <span className="pill-value">{roomId}</span>
               </div>
-              <button
-                className="end-session-btn"
-                onClick={handleEndSession}
-                title="End session and logout all students"
-              >
-                End Session
-              </button>
               <div className="status-group">
                 <span className="status-pill session-pill">Session live</span>
                 <span className={`status-pill connection-pill ${isConnected ? 'online' : 'offline'}`}>
@@ -1140,6 +1144,13 @@ const TeacherDashboard = () => {
                   <span>online</span>
                 </span>
               </div>
+              <button
+                className="end-session-btn"
+                onClick={handleEndSession}
+                title="End session and logout all students"
+              >
+                End Session
+              </button>
             </div>
           </div>
 
