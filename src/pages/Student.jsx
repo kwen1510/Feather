@@ -616,7 +616,17 @@ function Student() {
 
   // Handle page refresh - confirm and logout
   useEffect(() => {
+    if (!channel) return;
+
     const handleBeforeUnload = (e) => {
+      // Immediately leave presence to avoid duplicate sessions
+      try {
+        // Use sync method for immediate effect
+        channel.presence.leaveClient(clientId);
+      } catch (error) {
+        console.error('Error leaving presence on unload:', error);
+      }
+
       // Set flag to logout on reload
       sessionStorage.setItem('student-logout-on-load', 'true');
 
@@ -626,12 +636,29 @@ function Student() {
       return e.returnValue;
     };
 
+    // Use pagehide for better mobile support (iOS Safari, iPad)
+    const handlePageHide = (e) => {
+      console.log('📱 Page hide event - cleaning up session');
+
+      // Immediately leave presence
+      try {
+        channel.presence.leaveClient(clientId);
+      } catch (error) {
+        console.error('Error leaving presence on pagehide:', error);
+      }
+
+      // Set logout flag
+      sessionStorage.setItem('student-logout-on-load', 'true');
+    };
+
     window.addEventListener('beforeunload', handleBeforeUnload);
+    window.addEventListener('pagehide', handlePageHide);
 
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload);
+      window.removeEventListener('pagehide', handlePageHide);
     };
-  }, []);
+  }, [channel, clientId]);
 
   // Auto-save student work to Supabase every 10 seconds
   useEffect(() => {

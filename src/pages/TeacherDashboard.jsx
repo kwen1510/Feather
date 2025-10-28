@@ -452,43 +452,55 @@ const TeacherDashboard = () => {
 
   // Refresh protection and session end handling
   useEffect(() => {
-    const handleBeforeUnload = async (e) => {
+    const handleBeforeUnload = (e) => {
       if (sessionStatus === 'active' || sessionStatus === 'created') {
         // Show browser confirmation dialog
         e.preventDefault();
         e.returnValue = 'This will end the session for all students. Are you sure?';
 
-        // End session in Supabase
-        if (sessionId) {
+        // End session immediately (use synchronous method)
+        if (sessionId && channel) {
           try {
-            await supabase
-              .from('sessions')
-              .update({
-                status: 'ended',
-                ended_at: new Date().toISOString(),
-              })
-              .eq('id', sessionId);
+            // Publish session-ended event synchronously
+            channel.publish('session-ended', {
+              timestamp: Date.now(),
+              reason: 'teacher_refresh',
+            });
 
-            // Publish session-ended event via Ably
-            if (channel) {
-              await channel.publish('session-ended', {
-                timestamp: Date.now(),
-                reason: 'teacher_left',
-              });
-            }
-
-            console.log('✅ Session ended');
+            // Use sendBeacon for reliable database update on page unload
+            const endpointUrl = `${window.location.origin}/api/end-session`;
+            const data = JSON.stringify({ sessionId });
+            navigator.sendBeacon(endpointUrl, data);
           } catch (error) {
-            console.error('Error ending session:', error);
+            console.error('Error ending session on unload:', error);
+          }
+        }
+      }
+    };
+
+    // Use pagehide for better mobile support
+    const handlePageHide = () => {
+      console.log('📱 Teacher page hide - ending session');
+      if (sessionStatus === 'active' || sessionStatus === 'created') {
+        if (sessionId && channel) {
+          try {
+            channel.publish('session-ended', {
+              timestamp: Date.now(),
+              reason: 'teacher_refresh',
+            });
+          } catch (error) {
+            console.error('Error ending session on pagehide:', error);
           }
         }
       }
     };
 
     window.addEventListener('beforeunload', handleBeforeUnload);
+    window.addEventListener('pagehide', handlePageHide);
 
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload);
+      window.removeEventListener('pagehide', handlePageHide);
     };
   }, [sessionStatus, sessionId, channel]);
 
@@ -878,9 +890,8 @@ const TeacherDashboard = () => {
     }
   };
 
-  // Handle going back
-  const handleBack = async () => {
-    // End session in Supabase
+  // End session helper function
+  const endSessionInDatabase = async (reason = 'teacher_ended') => {
     if (sessionId && (sessionStatus === 'active' || sessionStatus === 'created')) {
       try {
         await supabase
@@ -895,20 +906,45 @@ const TeacherDashboard = () => {
         if (channel) {
           await channel.publish('session-ended', {
             timestamp: Date.now(),
-            reason: 'teacher_ended',
+            reason: reason,
           });
         }
 
-        console.log('✅ Session ended');
+        console.log('✅ Session ended:', reason);
+        return true;
       } catch (error) {
         console.error('Error ending session:', error);
+        return false;
       }
     }
+    return false;
+  };
+
+  // Handle going back
+  const handleBack = async () => {
+    await endSessionInDatabase('teacher_back');
 
     if (ably) {
       ably.close();
     }
     navigate('/');
+  };
+
+  // Handle end session button click
+  const handleEndSession = async () => {
+    const confirmed = window.confirm(
+      'Are you sure you want to end this session?\n\nAll students will be logged out and the session will be closed.'
+    );
+
+    if (confirmed) {
+      await endSessionInDatabase('teacher_ended');
+
+      // Close connection and redirect
+      if (ably) {
+        ably.close();
+      }
+      navigate('/');
+    }
   };
 
   // Handle QR code modal
@@ -1045,6 +1081,13 @@ const TeacherDashboard = () => {
                 <span className="pill-label">Session code</span>
                 <span className="pill-value">{roomId}</span>
               </div>
+              <button
+                className="end-session-btn"
+                onClick={handleEndSession}
+                title="End session and logout all students"
+              >
+                End Session
+              </button>
               <div className="status-group">
                 <span className="status-pill session-pill">Session live</span>
                 <span className={`status-pill connection-pill ${isConnected ? 'online' : 'offline'}`}>
