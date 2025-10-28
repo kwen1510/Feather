@@ -89,7 +89,25 @@ function Student() {
   const studentName = searchParams.get('name');
 
   const [channel, setChannel] = useState(null);
-  const [clientId] = useState(`student-${Math.random().toString(36).substr(2, 9)}`);
+
+  // Generate stable clientId that persists across component remounts
+  const [clientId] = useState(() => {
+    // Check if we already have a clientId for this session
+    const sessionKey = `student-clientId-${roomId}-${studentName}`;
+    let existingId = sessionStorage.getItem(sessionKey);
+
+    if (!existingId) {
+      // Generate new clientId
+      existingId = `student-${Math.random().toString(36).substr(2, 9)}`;
+      sessionStorage.setItem(sessionKey, existingId);
+      console.log('🆕 [STUDENT] Generated new clientId:', existingId);
+    } else {
+      console.log('♻️ [STUDENT] Reusing existing clientId:', existingId);
+    }
+
+    return existingId;
+  });
+
   const [isConnected, setIsConnected] = useState(false);
 
   // Supabase session tracking
@@ -336,20 +354,29 @@ function Student() {
 
   // Initialize Ably connection
   useEffect(() => {
+    console.log('🔵 [STUDENT INIT] Starting Ably initialization for', clientId, 'in room', roomId);
+
+    let isCleanedUp = false; // Flag to prevent operations after cleanup
+
     const initAbly = async () => {
       try {
+        if (isCleanedUp) {
+          console.log('⚠️ [STUDENT INIT] Already cleaned up, skipping');
+          return;
+        }
+
         const ably = new Ably.Realtime({
           authUrl: '/api/token',
           authParams: { clientId },
         });
 
         ably.connection.on('connected', () => {
-          console.log('Connected to Ably');
+          console.log('✅ [STUDENT] Connected to Ably as', clientId);
           setIsConnected(true);
         });
 
         ably.connection.on('disconnected', () => {
-          console.log('Disconnected from Ably');
+          console.log('🔴 [STUDENT] Disconnected from Ably');
           setIsConnected(false);
         });
 
@@ -442,31 +469,44 @@ function Student() {
         });
 
         // Enter presence with student name and initial visibility status
+        console.log('📥 [STUDENT PRESENCE] Entering presence as', studentName, 'with clientId', clientId);
         await whiteboardChannel.presence.enter({
           name: studentName,
           isVisible: !document.hidden
         });
-        console.log(`Joined room ${roomId} as ${studentName}`);
+        console.log('✅ [STUDENT PRESENCE] Successfully joined room', roomId, 'as', studentName);
+
+        if (isCleanedUp) {
+          console.log('⚠️ [STUDENT INIT] Cleaned up during init, leaving presence');
+          await whiteboardChannel.presence.leave();
+          ably.close();
+          return;
+        }
 
         setChannel(whiteboardChannel);
 
         // Request current question state after joining (in case we're joining mid-session)
         setTimeout(() => {
-          whiteboardChannel.publish('request-current-state', {
-            clientId: clientId,
-            timestamp: Date.now(),
-          });
-          console.log('📞 Requested current question state from teacher');
+          if (!isCleanedUp) {
+            whiteboardChannel.publish('request-current-state', {
+              clientId: clientId,
+              timestamp: Date.now(),
+            });
+            console.log('📞 [STUDENT] Requested current question state from teacher');
+          }
         }, 1000); // Wait 1 second to ensure all subscriptions are set up
 
         return () => {
+          console.log('🧹 [STUDENT CLEANUP] Starting cleanup for', clientId);
+          isCleanedUp = true;
+
           // Leave presence before closing connection
           if (whiteboardChannel) {
             whiteboardChannel.presence.leave().then(() => {
-              console.log('👋 Left presence as', clientId);
+              console.log('👋 [STUDENT CLEANUP] Left presence as', clientId);
               ably.close();
             }).catch((err) => {
-              console.error('Error leaving presence:', err);
+              console.error('❌ [STUDENT CLEANUP] Error leaving presence:', err);
               ably.close();
             });
           } else {
@@ -474,12 +514,12 @@ function Student() {
           }
         };
       } catch (error) {
-        console.error('Failed to initialize Ably:', error);
+        console.error('❌ [STUDENT INIT] Failed to initialize Ably:', error);
       }
     };
 
     initAbly();
-  }, [clientId, roomId]);
+  }, [clientId, roomId, studentName]);
 
   // Track tab visibility and notify teacher
   useEffect(() => {
@@ -583,15 +623,18 @@ function Student() {
     if (!channel) return;
 
     const handleBeforeUnload = (e) => {
+      console.log('🚪 [STUDENT] Page unload - cleaning up');
+
       // Immediately leave presence to avoid duplicate sessions
       try {
-        // Use sync method for immediate effect
         channel.presence.leaveClient(clientId);
       } catch (error) {
-        console.error('Error leaving presence on unload:', error);
+        console.error('❌ [STUDENT] Error leaving presence on unload:', error);
       }
 
-      // Set flag to logout on reload
+      // Clean up session storage
+      const sessionKey = `student-clientId-${roomId}-${studentName}`;
+      sessionStorage.removeItem(sessionKey);
       sessionStorage.setItem('student-logout-on-load', 'true');
 
       // Show browser confirmation dialog
@@ -602,16 +645,18 @@ function Student() {
 
     // Use pagehide for better mobile support (iOS Safari, iPad)
     const handlePageHide = (e) => {
-      console.log('📱 Page hide event - cleaning up session');
+      console.log('📱 [STUDENT] Page hide event - cleaning up session');
 
       // Immediately leave presence
       try {
         channel.presence.leaveClient(clientId);
       } catch (error) {
-        console.error('Error leaving presence on pagehide:', error);
+        console.error('❌ [STUDENT] Error leaving presence on pagehide:', error);
       }
 
-      // Set logout flag
+      // Clean up session storage
+      const sessionKey = `student-clientId-${roomId}-${studentName}`;
+      sessionStorage.removeItem(sessionKey);
       sessionStorage.setItem('student-logout-on-load', 'true');
     };
 
@@ -622,7 +667,7 @@ function Student() {
       window.removeEventListener('beforeunload', handleBeforeUnload);
       window.removeEventListener('pagehide', handlePageHide);
     };
-  }, [channel, clientId]);
+  }, [channel, clientId, roomId, studentName]);
 
   // Auto-save student work to Supabase every 10 seconds
   useEffect(() => {
