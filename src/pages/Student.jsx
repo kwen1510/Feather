@@ -343,16 +343,13 @@ function Student() {
 
         const whiteboardChannel = ably.channels.get(`room-${roomId}`);
 
-        // Listen for student layer updates (only react to own messages)
+        // Listen for student layer updates
+        // NOTE: Students should NOT listen to their own messages to avoid race conditions
+        // Only the teacher needs to see student updates
         whiteboardChannel.subscribe('student-layer', (message) => {
-          if (message.clientId !== clientId) {
-            return; // Ignore strokes from other students
-          }
-          isRemoteUpdate.current = true;
-          setStudentLines(message.data.lines || []);
-          setTimeout(() => {
-            isRemoteUpdate.current = false;
-          }, 100);
+          // Ignore all student-layer messages when you're a student
+          // Students maintain their own local state
+          return;
         });
 
         // Listen for teacher annotations and filter by targetStudentId
