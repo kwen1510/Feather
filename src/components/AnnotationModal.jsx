@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Stage, Layer, Line, Image as KonvaImage } from 'react-konva';
+import { Pen, Eraser, Undo, Redo, Trash2 } from 'lucide-react';
 import FlagIcon from './FlagIcon';
 import './AnnotationModal.css';
 
@@ -30,6 +31,7 @@ const AnnotationModal = ({
   const [inputMode, setInputMode] = useState('stylus-only');
   const [toolbarPosition, setToolbarPosition] = useState('left');
   const [image, setImage] = useState(null);
+  const [isMobile, setIsMobile] = useState(false);
 
   const undoStack = useRef([]);
   const redoStack = useRef([]);
@@ -66,6 +68,16 @@ const AnnotationModal = ({
     }),
     [canvasSize]
   );
+
+  // Detect mobile device
+  useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth <= 768);
+    };
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
 
   // Load saved preferences
   useEffect(() => {
@@ -496,8 +508,67 @@ const AnnotationModal = ({
             </div>
           </div>
 
-          <div className={`annotation-workspace ${toolbarPosition === 'right' ? 'toolbar-right' : ''}`}>
-            <div className="annotation-sidebar">
+          <div className={`annotation-workspace ${toolbarPosition === 'right' ? 'toolbar-right' : ''} ${isMobile ? 'mobile-view' : ''}`}>
+            {isMobile ? (
+              /* Mobile Toolbar - Compact horizontal layout */
+              <div className="mobile-annotation-toolbar">
+                {/* Horizontal color buttons */}
+                <div className="mobile-colors">
+                  {colorOptions.map((option) => (
+                    <button
+                      key={option.value}
+                      onClick={() => setColor(option.value)}
+                      className={`mobile-color-button ${color === option.value ? 'active' : ''}`}
+                      style={{ background: option.value }}
+                      aria-label={option.label}
+                    />
+                  ))}
+                </div>
+
+                {/* Tool and action buttons */}
+                <div className="mobile-tools">
+                  <button
+                    onClick={() => setTool('pen')}
+                    className={`mobile-tool-button ${tool === 'pen' ? 'active' : ''}`}
+                    aria-label="Pen"
+                  >
+                    <Pen size={20} />
+                  </button>
+                  <button
+                    onClick={() => setTool('eraser')}
+                    className={`mobile-tool-button ${tool === 'eraser' ? 'active' : ''}`}
+                    aria-label="Eraser"
+                  >
+                    <Eraser size={20} />
+                  </button>
+                  <button
+                    onClick={handleUndo}
+                    className="mobile-tool-button"
+                    disabled={undoStack.current.length === 0}
+                    aria-label="Undo"
+                  >
+                    <Undo size={20} />
+                  </button>
+                  <button
+                    onClick={handleRedo}
+                    className="mobile-tool-button"
+                    disabled={redoStack.current.length === 0}
+                    aria-label="Redo"
+                  >
+                    <Redo size={20} />
+                  </button>
+                  <button
+                    onClick={handleClear}
+                    className="mobile-tool-button danger"
+                    aria-label="Clear"
+                  >
+                    <Trash2 size={20} />
+                  </button>
+                </div>
+              </div>
+            ) : (
+              /* Desktop Sidebar - Full vertical layout */
+              <div className="annotation-sidebar">
               <div className="sidebar-header">
                 <h2>Annotation Console</h2>
                 <p>Mirror of student workspace</p>
@@ -588,6 +659,7 @@ const AnnotationModal = ({
                 </div>
               </div>
             </div>
+            )}
 
             <div className="annotation-canvas-panel">
               <div
