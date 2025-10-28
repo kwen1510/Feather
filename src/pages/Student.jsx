@@ -4,6 +4,8 @@ import { Stage, Layer, Line, Image as KonvaImage } from 'react-konva';
 import * as Ably from 'ably';
 import { supabase } from '../supabaseClient';
 import { Pen, Eraser, Undo, Redo, Trash2 } from 'lucide-react';
+import { getOrCreateStudentId } from '../utils/identity';
+import { saveStudentWork, loadStudentWork, cleanupOldSessions } from '../utils/indexedDB';
 import './StudentNew.css';
 
 const BASE_CANVAS = { width: 800, height: 600 };
@@ -92,6 +94,7 @@ function Student() {
 
   const clientIdentityRef = useRef({ roomId: null, studentName: null, clientId: null });
   const [clientId, setClientId] = useState(null);
+  const [studentId, setStudentId] = useState(null); // Persistent identity across refreshes
 
   const [isConnected, setIsConnected] = useState(false);
 
@@ -149,6 +152,17 @@ function Student() {
     clientIdentityRef.current = { roomId, studentName, clientId: generatedClientId };
     setClientId(generatedClientId);
   }, [studentName, roomId]);
+
+  // Initialize persistent studentId and cleanup old data
+  useEffect(() => {
+    const id = getOrCreateStudentId();
+    setStudentId(id);
+
+    // Cleanup old IndexedDB sessions (older than 7 days)
+    cleanupOldSessions(7).catch(err => {
+      console.error('Failed to cleanup old sessions:', err);
+    });
+  }, []);
 
   // Load saved preferences only when we have valid room and name
   useEffect(() => {
@@ -341,15 +355,24 @@ function Student() {
         setSessionId(session.id);
         setSessionStatus(session.status === 'active' ? 'active' : 'waiting');
 
+        // Check for existing participant by student_id (persistent) or client_id (legacy)
         const { data: existingParticipant } = await supabase
           .from('participants')
           .select('*')
           .eq('session_id', session.id)
-          .eq('client_id', clientId)
+          .or(`student_id.eq.${studentId},client_id.eq.${clientId}`)
           .maybeSingle();
 
         if (existingParticipant) {
           setParticipantId(existingParticipant.id);
+          // Update client_id if it changed (after refresh)
+          if (existingParticipant.client_id !== clientId) {
+            await supabase
+              .from('participants')
+              .update({ client_id: clientId })
+              .eq('id', existingParticipant.id);
+            console.log('✅ Updated participant client_id after refresh');
+          }
           return;
         }
 
@@ -361,6 +384,7 @@ function Student() {
             {
               session_id: session.id,
               client_id: clientId,
+              student_id: studentId,
               name: studentName,
               role: 'student',
             }
@@ -423,12 +447,22 @@ function Student() {
               });
               console.log('✅ Re-entered presence as:', studentName);
 
+              // Load from IndexedDB if in-memory state is empty
+              let linesToSend = studentLinesRef.current;
+              if ((!linesToSend || linesToSend.length === 0) && studentId && sessionId && currentQuestionId) {
+                console.log('🔄 In-memory state empty, loading from IndexedDB');
+                const saved = await loadStudentWork(studentId, sessionId, currentQuestionId);
+                if (saved?.lines) {
+                  linesToSend = saved.lines;
+                  setStudentLines(saved.lines);
+                }
+              }
+
               // Resend current drawing state if student has drawn anything
-              const currentLines = studentLinesRef.current;
-              if (currentLines && currentLines.length > 0) {
-                console.log('🔄 Resending student drawing state:', currentLines.length, 'lines');
+              if (linesToSend && linesToSend.length > 0) {
+                console.log('🔄 Resending student drawing state:', linesToSend.length, 'lines');
                 await whiteboardChannel.publish('student-layer', {
-                  lines: currentLines,
+                  lines: linesToSend,
                   clientId,
                   name: studentName,
                   meta: {
@@ -607,7 +641,7 @@ function Student() {
         }
       }
     };
-  }, [clientId, roomId, studentName, navigate]);
+  }, [clientId, roomId, studentName, navigate, studentId, sessionId, currentQuestionId]);
 
   // Track tab visibility and notify teacher
   useEffect(() => {
@@ -688,12 +722,58 @@ function Student() {
   }, [toolbarPosition, isMobile]);
 
   // Sync student lines to Ably
+  // Load saved work from IndexedDB when question changes
+  useEffect(() => {
+    if (!studentId || !sessionId || !currentQuestionId || !channel) return;
+
+    const loadSavedWork = async () => {
+      console.log('🔄 Loading saved work for question:', currentQuestionId);
+      const saved = await loadStudentWork(studentId, sessionId, currentQuestionId);
+
+      if (saved?.lines && saved.lines.length > 0) {
+        console.log('📂 Restoring', saved.lines.length, 'lines from IndexedDB');
+        isRemoteUpdate.current = true;
+        setStudentLines(saved.lines);
+
+        // Immediately publish restored state to teacher
+        setTimeout(() => {
+          channel.publish('student-layer', {
+            lines: saved.lines,
+            clientId,
+            name: studentName,
+            meta: saved.meta || {
+              base: BASE_CANVAS,
+              display: canvasSize,
+              scale: canvasScale,
+            },
+          });
+          isRemoteUpdate.current = false;
+        }, 100);
+      } else {
+        console.log('ℹ️ No saved work found for this question');
+      }
+    };
+
+    loadSavedWork();
+  }, [studentId, sessionId, currentQuestionId, channel, clientId, studentName, canvasSize, canvasScale]);
+
+  // Sync student lines to Ably and IndexedDB
   useEffect(() => {
     if (!clientId || !channel || isRemoteUpdate.current) {
       return;
     }
 
-    const timer = setTimeout(() => {
+    const timer = setTimeout(async () => {
+      // Save to IndexedDB first
+      if (studentId && sessionId && currentQuestionId) {
+        await saveStudentWork(studentId, sessionId, currentQuestionId, studentLines, {
+          base: BASE_CANVAS,
+          display: canvasSize,
+          scale: canvasScale,
+        });
+      }
+
+      // Then publish to Ably for real-time sync
       channel.publish('student-layer', {
         lines: studentLines,
         clientId,
@@ -707,7 +787,7 @@ function Student() {
     }, 150);
 
     return () => clearTimeout(timer);
-  }, [studentLines, channel, clientId, canvasSize, canvasScale, studentName]);
+  }, [studentLines, channel, clientId, canvasSize, canvasScale, studentName, studentId, sessionId, currentQuestionId]);
 
 
   // Auto-save student work to Supabase every 10 seconds

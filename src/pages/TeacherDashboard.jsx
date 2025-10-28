@@ -7,6 +7,13 @@ import StudentCard from '../components/StudentCard';
 import AnnotationModal from '../components/AnnotationModal';
 import { resizeAndCompressImage } from '../utils/imageUtils';
 import { supabase } from '../supabaseClient';
+import {
+  saveSessionState,
+  loadSessionState,
+  saveTeacherAnnotation,
+  loadTeacherAnnotations,
+  cleanupOldSessions
+} from '../utils/indexedDB';
 import './TeacherDashboard.css';
 
 const TeacherDashboard = () => {
@@ -322,6 +329,59 @@ const TeacherDashboard = () => {
     };
   }, [roomId, clientId]);
 
+  // Load session state from IndexedDB and cleanup old data
+  useEffect(() => {
+    if (!sessionId) return;
+
+    const loadAndCleanup = async () => {
+      try {
+        // Cleanup old sessions (older than 7 days)
+        await cleanupOldSessions(7);
+
+        // Load saved session state from IndexedDB
+        console.log('🔄 Loading session state from IndexedDB:', sessionId);
+        const savedState = await loadSessionState(sessionId);
+
+        if (savedState) {
+          console.log('📂 Restored session state:', {
+            students: Object.keys(savedState.students || {}).length,
+            questionNumber: savedState.questionNumber,
+            hasSharedImage: !!savedState.sharedImage
+          });
+
+          // Restore student work
+          if (savedState.students && Object.keys(savedState.students).length > 0) {
+            setStudents(savedState.students);
+          }
+
+          // Restore question state
+          if (savedState.questionNumber !== undefined) {
+            setQuestionNumber(savedState.questionNumber);
+          }
+          if (savedState.currentQuestionId) {
+            setCurrentQuestionId(savedState.currentQuestionId);
+
+            // Load teacher annotations for current question
+            const annotations = await loadTeacherAnnotations(sessionId, savedState.currentQuestionId);
+            if (Object.keys(annotations).length > 0) {
+              console.log('📂 Restored teacher annotations for', Object.keys(annotations).length, 'students');
+              setTeacherAnnotations(annotations);
+            }
+          }
+          if (savedState.sharedImage) {
+            setSharedImage(savedState.sharedImage);
+          }
+        } else {
+          console.log('ℹ️ No saved session state found in IndexedDB');
+        }
+      } catch (error) {
+        console.error('❌ Failed to load session state:', error);
+      }
+    };
+
+    loadAndCleanup();
+  }, [sessionId]);
+
   // Connect to Ably
   useEffect(() => {
     // Prevent duplicate initialization
@@ -631,6 +691,48 @@ const TeacherDashboard = () => {
     };
   }, [roomId, clientId]);
 
+  // Auto-save session state to IndexedDB every 10 seconds
+  useEffect(() => {
+    if (!sessionId) return;
+
+    const interval = setInterval(async () => {
+      try {
+        await saveSessionState(sessionId, {
+          students: students,
+          questionNumber: questionNumber,
+          currentQuestionId: currentQuestionId,
+          sharedImage: sharedImage,
+        });
+        console.log('💾 Auto-saved session state to IndexedDB');
+      } catch (error) {
+        console.error('❌ Failed to auto-save session state:', error);
+      }
+    }, 10000); // Every 10 seconds
+
+    return () => clearInterval(interval);
+  }, [sessionId, students, questionNumber, currentQuestionId, sharedImage]);
+
+  // Auto-save teacher annotations to IndexedDB every 10 seconds
+  useEffect(() => {
+    if (!sessionId || !currentQuestionId) return;
+
+    const interval = setInterval(async () => {
+      try {
+        // Save all teacher annotations for current question
+        const annotationCount = Object.keys(teacherAnnotations).length;
+        if (annotationCount > 0) {
+          for (const [targetStudentId, annotations] of Object.entries(teacherAnnotations)) {
+            await saveTeacherAnnotation(sessionId, targetStudentId, currentQuestionId, annotations);
+          }
+          console.log('💾 Auto-saved teacher annotations for', annotationCount, 'students');
+        }
+      } catch (error) {
+        console.error('❌ Failed to auto-save teacher annotations:', error);
+      }
+    }, 10000); // Every 10 seconds
+
+    return () => clearInterval(interval);
+  }, [sessionId, currentQuestionId, teacherAnnotations]);
 
   // Extract friendly name from clientId
   const extractStudentName = (clientId) => {
@@ -649,7 +751,7 @@ const TeacherDashboard = () => {
   };
 
   // Handle teacher annotations
-  const handleAnnotate = (annotations) => {
+  const handleAnnotate = async (annotations) => {
     if (!selectedStudent || !channel) return;
     const targetStudentId = selectedStudent.clientId;
 
@@ -658,6 +760,16 @@ const TeacherDashboard = () => {
       ...prev,
       [targetStudentId]: annotations,
     }));
+
+    // Save to IndexedDB immediately
+    if (sessionId && currentQuestionId) {
+      try {
+        await saveTeacherAnnotation(sessionId, targetStudentId, currentQuestionId, annotations);
+        console.log('💾 Saved teacher annotation to IndexedDB');
+      } catch (error) {
+        console.error('❌ Failed to save teacher annotation:', error);
+      }
+    }
 
     // Publish annotations to Ably with targetStudentId
     channel.publish('teacher-annotation', {
@@ -975,6 +1087,88 @@ const TeacherDashboard = () => {
           sessionId: sessionId,
         });
 
+      }
+
+      // BEFORE moving to next question: Save all current work to Supabase
+      if (currentQuestionId) {
+        console.log('💾 Saving all work from Q', questionNumber, 'to Supabase before moving to next question');
+
+        // Batch save all student work and teacher annotations
+        const savePromises = [];
+
+        for (const [clientId, student] of Object.entries(students)) {
+          if (student.lines && student.lines.length > 0) {
+            // Get participant record for this student
+            const { data: participant } = await supabase
+              .from('participants')
+              .select('id')
+              .eq('session_id', sessionId)
+              .eq('client_id', clientId)
+              .eq('role', 'student')
+              .maybeSingle();
+
+            if (participant) {
+              const teacherAnno = teacherAnnotations[clientId] || [];
+
+              const savePromise = supabase
+                .from('annotations')
+                .upsert({
+                  session_id: sessionId,
+                  participant_id: participant.id,
+                  question_id: currentQuestionId,
+                  student_lines: student.lines,
+                  teacher_annotations: teacherAnno,
+                  last_updated_at: new Date().toISOString(),
+                }, {
+                  onConflict: 'participant_id,question_id'
+                });
+
+              savePromises.push(savePromise);
+            }
+          }
+        }
+
+        // Also save teacher annotations for students who haven't drawn yet
+        for (const [targetStudentId, annotations] of Object.entries(teacherAnnotations)) {
+          if (!students[targetStudentId]?.lines?.length && annotations.length > 0) {
+            // Find participant
+            const { data: participant } = await supabase
+              .from('participants')
+              .select('id')
+              .eq('session_id', sessionId)
+              .eq('client_id', targetStudentId)
+              .eq('role', 'student')
+              .maybeSingle();
+
+            if (participant) {
+              const savePromise = supabase
+                .from('annotations')
+                .upsert({
+                  session_id: sessionId,
+                  participant_id: participant.id,
+                  question_id: currentQuestionId,
+                  student_lines: [],
+                  teacher_annotations: annotations,
+                  last_updated_at: new Date().toISOString(),
+                }, {
+                  onConflict: 'participant_id,question_id'
+                });
+
+              savePromises.push(savePromise);
+            }
+          }
+        }
+
+        // Wait for all saves to complete
+        if (savePromises.length > 0) {
+          try {
+            await Promise.all(savePromises);
+            console.log(`✅ Saved work for ${savePromises.length} students to Supabase`);
+          } catch (saveError) {
+            console.error('❌ Failed to save some work to Supabase:', saveError);
+            // Continue anyway - work is still in IndexedDB
+          }
+        }
       }
 
       // Increment question number
