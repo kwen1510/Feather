@@ -5,7 +5,7 @@ import * as Ably from 'ably';
 import { supabase } from '../supabaseClient';
 import { Pen, Eraser, Undo, Redo, Trash2 } from 'lucide-react';
 import { getOrCreateStudentId } from '../utils/identity';
-import { saveStudentWork, loadStudentWork, cleanupOldSessions } from '../utils/indexedDB';
+import { saveStudentWork, loadStudentWork, cleanupOldSessions, clearSessionData } from '../utils/indexedDB';
 import './StudentNew.css';
 
 const BASE_CANVAS = { width: 800, height: 600 };
@@ -164,6 +164,33 @@ function Student() {
     });
   }, []);
 
+  // Track previous sessionId to detect session changes
+  const previousSessionIdRef = useRef(null);
+
+  // Clear memory when switching to a different session
+  useEffect(() => {
+    if (!sessionId) return;
+
+    const previousSessionId = previousSessionIdRef.current;
+
+    // If we had a previous session and it's different from current, clear old data
+    if (previousSessionId && previousSessionId !== sessionId) {
+      console.log('🔄 Session changed from', previousSessionId, 'to', sessionId);
+      console.log('🗑️ Clearing IndexedDB memory for old session:', previousSessionId);
+
+      clearSessionData(previousSessionId)
+        .then(() => {
+          console.log('✅ IndexedDB memory cleared for old session');
+        })
+        .catch(err => {
+          console.error('❌ Failed to clear old session data:', err);
+        });
+    }
+
+    // Update the ref with current sessionId
+    previousSessionIdRef.current = sessionId;
+  }, [sessionId]);
+
   // Load saved preferences only when we have valid room and name
   useEffect(() => {
     if (!roomId || !studentName) return;
@@ -227,6 +254,15 @@ function Student() {
   useEffect(() => {
     studentLinesRef.current = studentLines;
   }, [studentLines]);
+
+  // Ref to always access latest teacherLines for saving
+  const teacherLinesRef = useRef(teacherLines);
+  useEffect(() => {
+    teacherLinesRef.current = teacherLines;
+  }, [teacherLines]);
+
+  // Track last published line count for incremental updates
+  const lastPublishedLineCountRef = useRef(0);
 
   const isRemoteUpdate = useRef(false);
   const eraserStateSaved = useRef(false);
@@ -443,9 +479,10 @@ function Student() {
               // Re-enter presence
               await whiteboardChannel.presence.enter({
                 name: studentName,
+                studentId: studentId, // Include persistent studentId
                 isVisible: !document.hidden
               });
-              console.log('✅ Re-entered presence as:', studentName);
+              console.log('✅ Re-entered presence as:', studentName, 'with studentId:', studentId);
 
               // Load from IndexedDB if in-memory state is empty
               let linesToSend = studentLinesRef.current;
@@ -465,15 +502,19 @@ function Student() {
                   lines: linesToSend,
                   clientId,
                   name: studentName,
+                  isFullUpdate: true,
                   meta: {
                     base: BASE_CANVAS,
                     display: canvasSizeRef.current,
                     scale: canvasScaleRef.current,
                   },
                 });
+                // Reset counter after sending full state
+                lastPublishedLineCountRef.current = linesToSend.length;
                 console.log('✅ Drawing state resent');
               } else {
                 console.log('ℹ️ No drawing state to resend');
+                lastPublishedLineCountRef.current = 0;
               }
 
               // Request current question state
@@ -482,6 +523,14 @@ function Student() {
                 console.log('🔄 Requesting current question state');
                 whiteboardChannel.publish('request-current-state', {
                   clientId: clientId,
+                  timestamp: Date.now(),
+                });
+
+                // Also request teacher annotations sync to get latest
+                console.log('🔄 Requesting teacher annotation sync');
+                whiteboardChannel.publish('request-annotation-sync', {
+                  clientId: clientId,
+                  studentId: studentId, // Include persistent studentId
                   timestamp: Date.now(),
                 });
               }, 500);
@@ -511,9 +560,35 @@ function Student() {
         // Listen for teacher annotations and filter by targetStudentId
         subscribe('teacher-annotation', (message) => {
           if (!isActive) return;
+          console.log('📨 Received teacher-annotation event. Target:', message.data.targetStudentId, 'My clientId:', clientId, 'Match:', message.data.targetStudentId === clientId);
+
           if (message.data.targetStudentId === clientId) {
+            const annotations = message.data.annotations || [];
+            console.log('✅ ClientId matches! Applying', annotations.length, 'teacher annotation strokes');
+
             isRemoteUpdate.current = true;
-            setTeacherLines(message.data.annotations || []);
+            setTeacherLines(annotations);
+
+            // Save teacher annotations to IndexedDB immediately (async, non-blocking)
+            if (studentId && sessionId && currentQuestionId) {
+              saveStudentWork(
+                studentId,
+                sessionId,
+                currentQuestionId,
+                studentLinesRef.current,
+                {
+                  base: BASE_CANVAS,
+                  display: canvasSizeRef.current,
+                  scale: canvasScaleRef.current,
+                },
+                annotations
+              ).then(() => {
+                console.log('💾 Saved teacher annotation to IndexedDB');
+              }).catch(err => {
+                console.error('❌ Failed to save teacher annotation to IndexedDB:', err);
+              });
+            }
+
             setTimeout(() => {
               isRemoteUpdate.current = false;
             }, 100);
@@ -553,7 +628,11 @@ function Student() {
         subscribe('sync-question-state', (message) => {
           if (!isActive) return;
           if (message.data.targetClientId === clientId) {
-            setSharedImage(message.data.content);
+            const { content = null, questionId } = message.data;
+            setSharedImage(content || null);
+            if (questionId !== undefined) {
+              setCurrentQuestionId(questionId || null);
+            }
           }
         });
 
@@ -580,8 +659,16 @@ function Student() {
         });
 
         // Listen for session ended
-        subscribe('session-ended', () => {
+        subscribe('session-ended', async () => {
           if (!isActive) return;
+          console.log('🔚 Session ended - clearing IndexedDB memory for session:', sessionId);
+
+          // Clear all data for this session from IndexedDB
+          if (sessionId) {
+            await clearSessionData(sessionId);
+            console.log('✅ IndexedDB memory cleared for ended session');
+          }
+
           setSessionStatus('ended');
           navigate('/student-login');
         });
@@ -589,6 +676,7 @@ function Student() {
         // Enter presence with student name and initial visibility status
         await whiteboardChannel.presence.enter({
           name: studentName,
+          studentId: studentId, // Include persistent studentId
           isVisible: !document.hidden
         });
 
@@ -605,6 +693,13 @@ function Student() {
           if (!isActive) return;
           whiteboardChannel.publish('request-current-state', {
             clientId: clientId,
+            timestamp: Date.now(),
+          });
+
+          // Also request teacher annotations sync
+          whiteboardChannel.publish('request-annotation-sync', {
+            clientId: clientId,
+            studentId: studentId, // Include persistent studentId
             timestamp: Date.now(),
           });
         }, 1000);
@@ -655,6 +750,7 @@ function Student() {
 
       channel.presence.update({
         name: studentName,
+        studentId: studentId, // Include persistent studentId
         isVisible: isVisible,
         lastVisibilityChange: Date.now()
       });
@@ -727,63 +823,138 @@ function Student() {
     if (!studentId || !sessionId || !currentQuestionId || !channel) return;
 
     const loadSavedWork = async () => {
-      console.log('🔄 Loading saved work for question:', currentQuestionId);
+      console.log('🔄 Checking IndexedDB memory for question:', currentQuestionId);
+
+      // Capture current lines in case student already started drawing
+      const currentLines = studentLinesRef.current || [];
+      const hasDrawnWhileLoading = currentLines.length > 0;
+
+      // Reset counter for new question (will be updated after merge)
+      lastPublishedLineCountRef.current = 0;
+
       const saved = await loadStudentWork(studentId, sessionId, currentQuestionId);
 
       if (saved?.lines && saved.lines.length > 0) {
-        console.log('📂 Restoring', saved.lines.length, 'lines from IndexedDB');
-        isRemoteUpdate.current = true;
-        setStudentLines(saved.lines);
+        console.log('📂 ✅ LOADED FROM INDEXEDDB MEMORY:', saved.lines.length, 'lines restored for question', currentQuestionId);
 
-        // Immediately publish restored state to teacher
+        // Merge: Keep saved lines + append any new lines drawn while loading
+        let finalLines = saved.lines;
+        if (hasDrawnWhileLoading) {
+          console.log('🔀 Student drew', currentLines.length, 'new strokes while IndexedDB was loading - merging with saved', saved.lines.length, 'strokes');
+          finalLines = [...saved.lines, ...currentLines];
+          console.log('✅ Merged result:', finalLines.length, 'total strokes');
+        }
+
+        isRemoteUpdate.current = true;
+        setStudentLines(finalLines);
+
+        // Also restore teacher annotations if they exist
+        if (saved.teacherAnnotations && saved.teacherAnnotations.length > 0) {
+          console.log('👨‍🏫 Restored', saved.teacherAnnotations.length, 'teacher annotation strokes from IndexedDB');
+          setTeacherLines(saved.teacherAnnotations);
+        }
+
+        // Save merged result to IndexedDB (especially if we merged new strokes)
+        if (hasDrawnWhileLoading) {
+          await saveStudentWork(
+            studentId,
+            sessionId,
+            currentQuestionId,
+            finalLines,
+            saved.meta || {
+              base: BASE_CANVAS,
+              display: canvasSize,
+              scale: canvasScale,
+            },
+            saved.teacherAnnotations || []
+          );
+          console.log('💾 Saved merged strokes (including new strokes drawn while loading) to IndexedDB');
+        }
+
+        // Immediately publish full merged state to teacher
         setTimeout(() => {
           channel.publish('student-layer', {
-            lines: saved.lines,
+            lines: finalLines,
             clientId,
             name: studentName,
+            isFullUpdate: true,
             meta: saved.meta || {
               base: BASE_CANVAS,
               display: canvasSize,
               scale: canvasScale,
             },
           });
+          lastPublishedLineCountRef.current = finalLines.length;
           isRemoteUpdate.current = false;
+          console.log('📤 Published', finalLines.length, 'strokes to teacher (', saved.lines.length, 'from IndexedDB +', currentLines.length, 'new)');
         }, 100);
       } else {
-        console.log('ℹ️ No saved work found for this question');
+        console.log('ℹ️ No saved work found in IndexedDB memory for this question - starting fresh');
+
+        // If student drew while loading (but no saved data), save those strokes now
+        if (hasDrawnWhileLoading) {
+          console.log('💾 Saving', currentLines.length, 'strokes drawn while IndexedDB was loading');
+          await saveStudentWork(
+            studentId,
+            sessionId,
+            currentQuestionId,
+            currentLines,
+            {
+              base: BASE_CANVAS,
+              display: canvasSize,
+              scale: canvasScale,
+            },
+            [] // No teacher annotations yet
+          );
+          console.log('✅ New strokes saved to IndexedDB');
+        }
       }
     };
 
     loadSavedWork();
   }, [studentId, sessionId, currentQuestionId, channel, clientId, studentName, canvasSize, canvasScale]);
 
-  // Sync student lines to Ably and IndexedDB
+  // Sync student lines to Ably and IndexedDB (per-stroke)
   useEffect(() => {
     if (!clientId || !channel || isRemoteUpdate.current) {
       return;
     }
 
     const timer = setTimeout(async () => {
-      // Save to IndexedDB first
+      // Always save full state to IndexedDB
       if (studentId && sessionId && currentQuestionId) {
-        await saveStudentWork(studentId, sessionId, currentQuestionId, studentLines, {
-          base: BASE_CANVAS,
-          display: canvasSize,
-          scale: canvasScale,
-        });
+        const lineCount = studentLines.length;
+        console.log('💾 Appending/Saving stroke to IndexedDB:', lineCount, 'total lines for question', currentQuestionId);
+        await saveStudentWork(
+          studentId,
+          sessionId,
+          currentQuestionId,
+          studentLines,
+          {
+            base: BASE_CANVAS,
+            display: canvasSize,
+            scale: canvasScale,
+          },
+          teacherLinesRef.current // Include current teacher annotations
+        );
+        console.log('✅ Successfully saved to IndexedDB');
       }
 
-      // Then publish to Ably for real-time sync
+      // Always broadcast full current state so teacher recovery is lossless
       channel.publish('student-layer', {
         lines: studentLines,
         clientId,
         name: studentName,
+        isFullUpdate: true,
         meta: {
           base: BASE_CANVAS,
           display: canvasSize,
           scale: canvasScale,
         },
       });
+
+      // Update last published count
+      lastPublishedLineCountRef.current = studentLines.length;
     }, 150);
 
     return () => clearTimeout(timer);

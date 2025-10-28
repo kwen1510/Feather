@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import Ably from 'ably/promises';
 import QRCode from 'qrcode';
@@ -12,7 +12,8 @@ import {
   loadSessionState,
   saveTeacherAnnotation,
   loadTeacherAnnotations,
-  cleanupOldSessions
+  cleanupOldSessions,
+  clearSessionData
 } from '../utils/indexedDB';
 import './TeacherDashboard.css';
 
@@ -61,6 +62,7 @@ const TeacherDashboard = () => {
   const [ably, setAbly] = useState(null);
   const [channel, setChannel] = useState(null);
   const [isConnected, setIsConnected] = useState(false);
+  const [sessionStateLoaded, setSessionStateLoaded] = useState(false); // Track if IndexedDB loaded
   const [clientId] = useState(`teacher-${Math.random().toString(36).substring(7)}`);
 
   // Student management
@@ -105,6 +107,10 @@ const TeacherDashboard = () => {
   const [isUploadingImage, setIsUploadingImage] = useState(false);
   const [sharedImage, setSharedImage] = useState(null); // Shared image sent to all students
   const sharedImageRef = useRef(null); // Ref to access latest sharedImage in callbacks
+  const teacherAnnotationsRef = useRef({}); // Ref to access latest teacherAnnotations in callbacks
+  const currentQuestionIdRef = useRef(null);
+  const questionNumberRef = useRef(0);
+  const logoutTimerRef = useRef(null);
   const imageInputRef = useRef(null);
   const linkInputRef = useRef(null); // Ref for the student link input field
   const [showQRModal, setShowQRModal] = useState(false);
@@ -116,11 +122,57 @@ const TeacherDashboard = () => {
   const participantInitRef = useRef(false);
   const joinedStudentsRef = useRef(new Set()); // Track students who have already joined this session
   const ablyInitializedRef = useRef(false); // Track if Ably has been initialized to prevent duplicates
+  const sessionSaveTimerRef = useRef(null);
 
   // Keep ref updated with latest sharedImage
   useEffect(() => {
     sharedImageRef.current = sharedImage;
   }, [sharedImage]);
+
+  // Keep ref updated with latest teacherAnnotations
+  useEffect(() => {
+    teacherAnnotationsRef.current = teacherAnnotations;
+  }, [teacherAnnotations]);
+
+  useEffect(() => {
+    currentQuestionIdRef.current = currentQuestionId;
+  }, [currentQuestionId]);
+
+  useEffect(() => {
+    questionNumberRef.current = questionNumber;
+  }, [questionNumber]);
+
+  // Persist dashboard state shortly after changes so refresh restores latest strokes
+  useEffect(() => {
+    if (!sessionId) {
+      return;
+    }
+
+    if (sessionSaveTimerRef.current) {
+      clearTimeout(sessionSaveTimerRef.current);
+    }
+
+    sessionSaveTimerRef.current = setTimeout(async () => {
+      sessionSaveTimerRef.current = null;
+      try {
+        await saveSessionState(sessionId, {
+          students,
+          questionNumber,
+          currentQuestionId,
+          sharedImage,
+        });
+      } catch (error) {
+        console.error('❌ Failed to save session state (debounced):', error);
+      }
+    }, 400);
+
+    return () => {
+      if (sessionSaveTimerRef.current) {
+        clearTimeout(sessionSaveTimerRef.current);
+        sessionSaveTimerRef.current = null;
+      }
+    };
+  }, [sessionId, students, questionNumber, currentQuestionId, sharedImage]);
 
   // Toast notification helper
   const toastIdCounter = useRef(0);
@@ -132,6 +184,48 @@ const TeacherDashboard = () => {
       setToasts(prev => prev.filter(t => t.id !== id));
     }, 4000);
   };
+
+  const endSessionInDatabase = useCallback(async (reason = 'teacher_ended') => {
+    if (!sessionId || (sessionStatus !== 'active' && sessionStatus !== 'created')) {
+      return false;
+    }
+
+    try {
+      await supabase
+        .from('sessions')
+        .update({
+          status: 'ended',
+          ended_at: new Date().toISOString(),
+        })
+        .eq('id', sessionId);
+
+      // Publish session-ended event
+      if (channel) {
+        await channel.publish('session-ended', {
+          timestamp: Date.now(),
+          reason,
+        });
+      }
+
+      try {
+        await clearSessionData(sessionId);
+      } catch (clearError) {
+        console.error('Failed to clear local session data:', clearError);
+      }
+
+      setSessionStatus('ended');
+
+      if (logoutTimerRef.current) {
+        clearTimeout(logoutTimerRef.current);
+        logoutTimerRef.current = null;
+      }
+
+      return true;
+    } catch (error) {
+      console.error('Error ending session:', error);
+      return false;
+    }
+  }, [sessionId, sessionStatus, channel]);
 
   // Save settings to localStorage
   useEffect(() => {
@@ -339,15 +433,9 @@ const TeacherDashboard = () => {
         await cleanupOldSessions(7);
 
         // Load saved session state from IndexedDB
-        console.log('🔄 Loading session state from IndexedDB:', sessionId);
         const savedState = await loadSessionState(sessionId);
 
         if (savedState) {
-          console.log('📂 Restored session state:', {
-            students: Object.keys(savedState.students || {}).length,
-            questionNumber: savedState.questionNumber,
-            hasSharedImage: !!savedState.sharedImage
-          });
 
           // Restore student work
           if (savedState.students && Object.keys(savedState.students).length > 0) {
@@ -357,35 +445,77 @@ const TeacherDashboard = () => {
           // Restore question state
           if (savedState.questionNumber !== undefined) {
             setQuestionNumber(savedState.questionNumber);
+            questionNumberRef.current = savedState.questionNumber;
           }
           if (savedState.currentQuestionId) {
             setCurrentQuestionId(savedState.currentQuestionId);
+            currentQuestionIdRef.current = savedState.currentQuestionId;
 
             // Load teacher annotations for current question
             const annotations = await loadTeacherAnnotations(sessionId, savedState.currentQuestionId);
             if (Object.keys(annotations).length > 0) {
-              console.log('📂 Restored teacher annotations for', Object.keys(annotations).length, 'students');
               setTeacherAnnotations(annotations);
             }
+          } else {
+            currentQuestionIdRef.current = null;
           }
           if (savedState.sharedImage) {
             setSharedImage(savedState.sharedImage);
           }
-        } else {
-          console.log('ℹ️ No saved session state found in IndexedDB');
         }
       } catch (error) {
         console.error('❌ Failed to load session state:', error);
+      } finally {
+        // Mark as loaded regardless of success/failure
+        setSessionStateLoaded(true);
       }
     };
 
     loadAndCleanup();
   }, [sessionId]);
 
-  // Connect to Ably
+  // Auto-logout teacher after 10 minutes of inactivity (disconnection)
   useEffect(() => {
-    // Prevent duplicate initialization
-    if (ablyInitializedRef.current || !roomId || !clientId) {
+    if (!sessionId || typeof window === 'undefined') {
+      return;
+    }
+
+    const shouldStartTimer = !isConnected && (sessionStatus === 'active' || sessionStatus === 'created');
+
+    if (shouldStartTimer && !logoutTimerRef.current) {
+      console.log('⏱️ Teacher disconnected, starting 10-minute auto-logout timer');
+      logoutTimerRef.current = window.setTimeout(async () => {
+        console.log('⏰ 10-minute timeout reached, automatically ending session');
+        const ended = await endSessionInDatabase('teacher_timeout_10min');
+        if (!ended) {
+          console.warn('Auto-logout timer fired but session was already ended or unavailable');
+        } else {
+          console.log('✅ Session ended due to teacher inactivity');
+        }
+        logoutTimerRef.current = null;
+      }, 10 * 60 * 1000);
+    }
+
+    if (isConnected && logoutTimerRef.current) {
+      console.log('✅ Teacher reconnected, cancelling auto-logout timer');
+      clearTimeout(logoutTimerRef.current);
+      logoutTimerRef.current = null;
+    }
+  }, [isConnected, sessionId, sessionStatus, endSessionInDatabase]);
+
+  useEffect(() => {
+    return () => {
+      if (logoutTimerRef.current) {
+        clearTimeout(logoutTimerRef.current);
+        logoutTimerRef.current = null;
+      }
+    };
+  }, []);
+
+  // Connect to Ably (only after session state is loaded)
+  useEffect(() => {
+    // Prevent duplicate initialization & wait for IndexedDB to load first
+    if (ablyInitializedRef.current || !roomId || !clientId || !sessionStateLoaded) {
       return;
     }
 
@@ -429,18 +559,32 @@ const TeacherDashboard = () => {
           setIsConnected(false);
         });
 
+        ablyClient.connection.on('suspended', () => {
+          setIsConnected(false);
+        });
+
+        ablyClient.connection.on('failed', () => {
+          setIsConnected(false);
+        });
+
+        ablyClient.connection.on('closing', () => {
+          setIsConnected(false);
+        });
+
+        ablyClient.connection.on('closed', () => {
+          setIsConnected(false);
+        });
+
         setAbly(ablyClient);
 
         // Get channel
         whiteboardChannel = ablyClient.channels.get(`room-${roomId}`);
 
-        // Subscribe to student drawings
+        // Subscribe to student drawings (full state - used for refresh/undo/redo/clear)
         whiteboardChannel.subscribe('student-layer', (message) => {
-
           isRemoteUpdate.current = true;
           setStudents(prev => {
             const existingStudent = prev[message.clientId];
-            // Use name from message, or keep existing name, or extract from clientId
             const studentName = message.data.name || existingStudent?.name || extractStudentName(message.clientId);
 
             return {
@@ -449,7 +593,35 @@ const TeacherDashboard = () => {
                 ...(existingStudent || {}),
                 clientId: message.clientId,
                 name: studentName,
-                lines: message.data.lines || [],
+                lines: message.data.lines || [], // REPLACE with full state
+                meta: message.data.meta || existingStudent?.meta || null,
+                lastUpdate: Date.now(),
+                isActive: true,
+                isFlagged: existingStudent?.isFlagged || false,
+              }
+            };
+          });
+
+          setTimeout(() => {
+            isRemoteUpdate.current = false;
+          }, 100);
+        });
+
+        // Subscribe to incremental student strokes (per-stroke updates)
+        whiteboardChannel.subscribe('student-stroke', (message) => {
+          isRemoteUpdate.current = true;
+          setStudents(prev => {
+            const existingStudent = prev[message.clientId];
+            const currentLines = existingStudent?.lines || [];
+            const studentName = message.data.name || existingStudent?.name || extractStudentName(message.clientId);
+
+            return {
+              ...prev,
+              [message.clientId]: {
+                ...(existingStudent || {}),
+                clientId: message.clientId,
+                name: studentName,
+                lines: [...currentLines, ...message.data.newStrokes], // APPEND new strokes
                 meta: message.data.meta || existingStudent?.meta || null,
                 lastUpdate: Date.now(),
                 isActive: true,
@@ -493,6 +665,7 @@ const TeacherDashboard = () => {
                 ...prev,
                 [member.clientId]: {
                   clientId: member.clientId,
+                  studentId: member.data?.studentId || null, // Track persistent studentId
                   name: studentName,
                   isActive: true,
                   isVisible: member.data?.isVisible !== false,
@@ -505,13 +678,13 @@ const TeacherDashboard = () => {
 
             // Send current question state to the newly joined student
             setTimeout(() => {
-              if (sharedImageRef.current) {
-                whiteboardChannel.publish('sync-question-state', {
-                  targetClientId: member.clientId,
-                  content: sharedImageRef.current,
-                  timestamp: Date.now(),
-                });
-              }
+              whiteboardChannel.publish('sync-question-state', {
+                targetClientId: member.clientId,
+                content: sharedImageRef.current || null,
+                questionId: currentQuestionIdRef.current,
+                questionNumber: questionNumberRef.current,
+                timestamp: Date.now(),
+              });
             }, 500);
           }
         });
@@ -573,18 +746,38 @@ const TeacherDashboard = () => {
 
         // Listen for students requesting current question state
         whiteboardChannel.subscribe('request-current-state', (message) => {
-
           // Send current question state to the requesting student
           setTimeout(() => {
-            if (sharedImageRef.current) {
-              whiteboardChannel.publish('sync-question-state', {
-                targetClientId: message.clientId,
-                content: sharedImageRef.current,
+            whiteboardChannel.publish('sync-question-state', {
+              targetClientId: message.clientId,
+              content: sharedImageRef.current || null,
+              questionId: currentQuestionIdRef.current,
+              questionNumber: questionNumberRef.current,
+              timestamp: Date.now(),
+            });
+          }, 100);
+        });
+
+        // Listen for students requesting teacher annotation sync
+        whiteboardChannel.subscribe('request-annotation-sync', (message) => {
+          const requestingClientId = message.clientId;
+          const requestingStudentId = message.data?.studentId; // Persistent studentId
+
+          // Get current annotations using persistent studentId
+          const currentAnnotations = teacherAnnotationsRef.current || {};
+          const studentAnnotations = currentAnnotations[requestingStudentId] || [];
+
+          // Send annotations back to the student's current clientId
+          setTimeout(() => {
+            if (studentAnnotations.length > 0) {
+              whiteboardChannel.publish('teacher-annotation', {
+                targetStudentId: requestingClientId, // Use clientId for Ably delivery
+                annotations: studentAnnotations,
+                teacherId: clientId,
                 timestamp: Date.now(),
               });
-            } else {
             }
-          }, 100);
+          }, 150);
         });
 
         // Enter presence with teacher role
@@ -596,29 +789,26 @@ const TeacherDashboard = () => {
         // Load existing students who are already in the room
         const existingMembers = await whiteboardChannel.presence.get();
 
-        // Build fresh student list from current presence members
-        const currentStudents = {};
+        // MERGE presence with restored state (don't replace!)
+        const currentStudents = { ...students }; // Start with restored state
 
-        // Keep any bot students from previous state
-        Object.keys(students).forEach(key => {
-          if (key.startsWith('bot-')) {
-            currentStudents[key] = students[key];
-          }
-        });
-
-        // Add all real students from presence
+        // Update students from presence (merge, don't replace)
         existingMembers.forEach(member => {
           if (member.clientId !== clientId && member.clientId.includes('student')) {
             const studentName = member.data?.name || extractStudentName(member.clientId);
+            const existingStudent = students[member.clientId] || {};
 
+            // Merge: Keep restored data (lines, etc.), update presence data (isActive, etc.)
             currentStudents[member.clientId] = {
+              ...existingStudent, // Keep all restored data (lines, studentId, etc.)
               clientId: member.clientId,
+              studentId: member.data?.studentId || existingStudent.studentId || null, // Extract studentId!
               name: studentName,
               isActive: true,
               isVisible: member.data?.isVisible !== false,
               lastUpdate: Date.now(),
-              isFlagged: false,
-              lines: [],
+              isFlagged: existingStudent.isFlagged || false,
+              // lines preserved from existingStudent via spread
             };
           }
         });
@@ -689,7 +879,7 @@ const TeacherDashboard = () => {
         ablyClient.close();
       }
     };
-  }, [roomId, clientId]);
+  }, [roomId, clientId, sessionStateLoaded]); // Wait for IndexedDB to load first
 
   // Auto-save session state to IndexedDB every 10 seconds
   useEffect(() => {
@@ -724,7 +914,6 @@ const TeacherDashboard = () => {
           for (const [targetStudentId, annotations] of Object.entries(teacherAnnotations)) {
             await saveTeacherAnnotation(sessionId, targetStudentId, currentQuestionId, annotations);
           }
-          console.log('💾 Auto-saved teacher annotations for', annotationCount, 'students');
         }
       } catch (error) {
         console.error('❌ Failed to auto-save teacher annotations:', error);
@@ -753,27 +942,34 @@ const TeacherDashboard = () => {
   // Handle teacher annotations
   const handleAnnotate = async (annotations) => {
     if (!selectedStudent || !channel) return;
-    const targetStudentId = selectedStudent.clientId;
 
-    // Store annotations locally
+    // Use persistent studentId for storage, clientId for Ably delivery
+    const persistentStudentId = selectedStudent.studentId;
+    const currentClientId = selectedStudent.clientId;
+
+    if (!persistentStudentId) {
+      console.error('❌ Student has no persistent studentId, cannot save annotation');
+      return;
+    }
+
+    // Store annotations locally using persistent studentId as key
     setTeacherAnnotations(prev => ({
       ...prev,
-      [targetStudentId]: annotations,
+      [persistentStudentId]: annotations,
     }));
 
-    // Save to IndexedDB immediately
+    // Save to IndexedDB using persistent studentId
     if (sessionId && currentQuestionId) {
       try {
-        await saveTeacherAnnotation(sessionId, targetStudentId, currentQuestionId, annotations);
-        console.log('💾 Saved teacher annotation to IndexedDB');
+        await saveTeacherAnnotation(sessionId, persistentStudentId, currentQuestionId, annotations);
       } catch (error) {
         console.error('❌ Failed to save teacher annotation:', error);
       }
     }
 
-    // Publish annotations to Ably with targetStudentId
+    // Publish annotations to Ably using current clientId for delivery
     channel.publish('teacher-annotation', {
-      targetStudentId,
+      targetStudentId: currentClientId, // Use clientId for Ably delivery
       annotations: annotations,
       teacherId: clientId,
       timestamp: Date.now(),
@@ -1108,7 +1304,8 @@ const TeacherDashboard = () => {
               .maybeSingle();
 
             if (participant) {
-              const teacherAnno = teacherAnnotations[clientId] || [];
+              // Use persistent studentId to get annotations (not clientId)
+              const teacherAnno = teacherAnnotations[student.studentId] || [];
 
               const savePromise = supabase
                 .from('annotations')
@@ -1174,6 +1371,7 @@ const TeacherDashboard = () => {
       // Increment question number
       const newQuestionNumber = questionNumber + 1;
       setQuestionNumber(newQuestionNumber);
+      questionNumberRef.current = newQuestionNumber;
 
       // Determine content type and data
       let contentType = 'blank';
@@ -1220,6 +1418,7 @@ const TeacherDashboard = () => {
       }
 
       setCurrentQuestionId(question.id);
+      currentQuestionIdRef.current = question.id;
 
       // Clear all student drawings and teacher annotations
       await channel.publish('clear-all-drawings', {
@@ -1266,35 +1465,6 @@ const TeacherDashboard = () => {
       setImageMessage('Failed to send. Please try again.');
       showToast('Failed to send question', 'error');
     }
-  };
-
-  // End session helper function
-  const endSessionInDatabase = async (reason = 'teacher_ended') => {
-    if (sessionId && (sessionStatus === 'active' || sessionStatus === 'created')) {
-      try {
-        await supabase
-          .from('sessions')
-          .update({
-            status: 'ended',
-            ended_at: new Date().toISOString(),
-          })
-          .eq('id', sessionId);
-
-        // Publish session-ended event
-        if (channel) {
-          await channel.publish('session-ended', {
-            timestamp: Date.now(),
-            reason: reason,
-          });
-        }
-
-        return true;
-      } catch (error) {
-        console.error('Error ending session:', error);
-        return false;
-      }
-    }
-    return false;
   };
 
   // Handle going back
@@ -1346,11 +1516,15 @@ const TeacherDashboard = () => {
   const handleCopyLink = async () => {
     const studentUrl = `${window.location.origin}/student?room=${roomId}`;
 
+    const notifySuccess = () => {
+      showToast('Link copied to clipboard!', 'success');
+    };
+
     // Try modern Clipboard API first (works on HTTPS)
     if (navigator.clipboard && window.isSecureContext) {
       try {
         await navigator.clipboard.writeText(studentUrl);
-        alert('Link copied to clipboard!');
+        notifySuccess();
         return;
       } catch (error) {
         console.error('Clipboard API failed:', error);
@@ -1362,27 +1536,25 @@ const TeacherDashboard = () => {
       const input = linkInputRef.current;
       if (input) {
         input.select();
-        input.setSelectionRange(0, 99999); // For mobile devices
+        input.setSelectionRange(0, studentUrl.length);
 
         // Try legacy execCommand
         const successful = document.execCommand('copy');
         if (successful) {
-          alert('Link copied to clipboard!');
+          notifySuccess();
           // Deselect
           window.getSelection().removeAllRanges();
-        } else {
-          throw new Error('execCommand failed');
+          return;
         }
-      } else {
-        throw new Error('Input ref not available');
       }
+      throw new Error('execCommand failed');
     } catch (error) {
       console.error('Fallback copy failed:', error);
       // Select the text so user can manually copy
       if (linkInputRef.current) {
         linkInputRef.current.select();
       }
-      alert('Please copy the selected link manually (Ctrl+C or Cmd+C)');
+      showToast('Select the link and press ⌘C/CTRL+C to copy', 'warning');
     }
   };
 
@@ -1750,7 +1922,7 @@ const TeacherDashboard = () => {
                       student={student}
                       onClick={handleCardClick}
                       onToggleFlag={toggleFlag}
-                      teacherAnnotations={teacherAnnotations[student.clientId] || []}
+                      teacherAnnotations={teacherAnnotations[student.studentId] || []}
                       sharedImage={sharedImage}
                       hideNames={hideNames}
                     />
@@ -1769,7 +1941,7 @@ const TeacherDashboard = () => {
         onClose={handleCloseModal}
         onAnnotate={handleAnnotate}
         existingAnnotations={
-          selectedStudentData ? (teacherAnnotations[selectedStudentData.clientId] || []) : []
+          selectedStudentData ? (teacherAnnotations[selectedStudentData.studentId] || []) : []
         }
         sharedImage={sharedImage}
       />

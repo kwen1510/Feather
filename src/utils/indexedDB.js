@@ -87,8 +87,9 @@ export const initDB = () => {
  * @param {string} questionId - Current question ID
  * @param {Array} lines - Array of line objects
  * @param {Object} meta - Canvas metadata (base, display, scale)
+ * @param {Array} teacherAnnotations - Optional teacher annotations array
  */
-export const saveStudentWork = async (studentId, sessionId, questionId, lines, meta) => {
+export const saveStudentWork = async (studentId, sessionId, questionId, lines, meta, teacherAnnotations = null) => {
   try {
     const db = await initDB();
     const id = `${studentId}-${sessionId}-${questionId}`;
@@ -100,6 +101,7 @@ export const saveStudentWork = async (studentId, sessionId, questionId, lines, m
       questionId,
       lines,
       meta,
+      teacherAnnotations: teacherAnnotations || [],
       timestamp: Date.now()
     };
 
@@ -108,7 +110,8 @@ export const saveStudentWork = async (studentId, sessionId, questionId, lines, m
 
     await store.put(record);
 
-    console.log('💾 Saved student work to IndexedDB:', id, lines.length, 'lines');
+    const teacherCount = teacherAnnotations ? teacherAnnotations.length : 0;
+    console.log('💾 Saved student work to IndexedDB:', id, lines.length, 'lines,', teacherCount, 'teacher annotations');
     return true;
   } catch (error) {
     console.error('❌ Failed to save student work:', error);
@@ -121,7 +124,7 @@ export const saveStudentWork = async (studentId, sessionId, questionId, lines, m
  * @param {string} studentId - Persistent student identifier
  * @param {string} sessionId - Current session ID
  * @param {string} questionId - Current question ID
- * @returns {Object|null} Saved work object or null
+ * @returns {Object|null} Saved work object {lines, meta, teacherAnnotations} or null
  */
 export const loadStudentWork = async (studentId, sessionId, questionId) => {
   try {
@@ -137,7 +140,8 @@ export const loadStudentWork = async (studentId, sessionId, questionId) => {
       request.onsuccess = () => {
         const result = request.result;
         if (result) {
-          console.log('📂 Loaded student work from IndexedDB:', id, result.lines?.length || 0, 'lines');
+          const teacherCount = result.teacherAnnotations?.length || 0;
+          console.log('📂 Loaded student work from IndexedDB:', id, result.lines?.length || 0, 'lines,', teacherCount, 'teacher annotations');
           resolve(result);
         } else {
           console.log('ℹ️ No saved student work found:', id);
@@ -158,7 +162,7 @@ export const loadStudentWork = async (studentId, sessionId, questionId) => {
 /**
  * Save teacher annotation to IndexedDB
  * @param {string} sessionId - Current session ID
- * @param {string} targetStudentId - Student being annotated (clientId)
+ * @param {string} targetStudentId - Student being annotated (persistent studentId, not clientId)
  * @param {string} questionId - Current question ID
  * @param {Array} annotations - Array of line objects
  */
@@ -193,17 +197,18 @@ export const saveTeacherAnnotation = async (sessionId, targetStudentId, question
  * Load all teacher annotations for a session and question
  * @param {string} sessionId - Current session ID
  * @param {string} questionId - Current question ID
- * @returns {Object} Map of targetStudentId → annotations array
+ * @returns {Object} Map of persistent studentId → annotations array
  */
 export const loadTeacherAnnotations = async (sessionId, questionId) => {
   try {
     const db = await initDB();
     const tx = db.transaction(STORES.TEACHER_ANNOTATIONS, 'readonly');
     const store = tx.objectStore(STORES.TEACHER_ANNOTATIONS);
-    const index = store.index('composite');
+    const index = store.index('sessionId');
 
-    const range = IDBKeyRange.only([sessionId, null, questionId]);
-    const request = index.openCursor();
+    // Use sessionId index to filter, then manually check questionId
+    const range = IDBKeyRange.only(sessionId);
+    const request = index.openCursor(range);
 
     return new Promise((resolve, reject) => {
       const results = {};
@@ -212,7 +217,8 @@ export const loadTeacherAnnotations = async (sessionId, questionId) => {
         const cursor = event.target.result;
         if (cursor) {
           const record = cursor.value;
-          if (record.sessionId === sessionId && record.questionId === questionId) {
+          // Filter by questionId as well
+          if (record.questionId === questionId) {
             results[record.targetStudentId] = record.annotations;
           }
           cursor.continue();
