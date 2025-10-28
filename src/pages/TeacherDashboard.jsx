@@ -380,8 +380,8 @@ const TeacherDashboard = () => {
           isRemoteUpdate.current = true;
           setStudents(prev => {
             const existingStudent = prev[message.clientId];
-            // Keep existing name or show placeholder until presence event provides real name
-            const studentName = existingStudent?.name || 'Loading...';
+            // Use name from message, or keep existing name, or extract from clientId
+            const studentName = message.data.name || existingStudent?.name || extractStudentName(message.clientId);
 
             return {
               ...prev,

@@ -100,7 +100,7 @@ function Student() {
   // Supabase session tracking
   const [sessionId, setSessionId] = useState(null);
   const [participantId, setParticipantId] = useState(null);
-  const [sessionStatus, setSessionStatus] = useState('loading'); // 'loading' | 'waiting' | 'active' | 'ended'
+  const [sessionStatus, setSessionStatus] = useState('loading'); // 'loading' | 'waiting' | 'active' | 'ended' | 'no-session'
   const [currentQuestionId, setCurrentQuestionId] = useState(null);
 
   // Student lines (editable, stored in base 800x600 coordinates)
@@ -308,17 +308,27 @@ function Student() {
           .limit(1);
 
         if (sessionError) {
-          setSessionStatus('ended');
+          console.error('Session query error:', sessionError);
+          setSessionStatus('no-session');
           return;
         }
 
         if (!sessions || sessions.length === 0) {
-          setSessionStatus('ended');
+          console.log('No session found for room code:', roomId);
+          setSessionStatus('no-session');
           return;
         }
 
         const session = sessions[0];
         if (cancelled) return;
+
+        // Check if the session has ended
+        if (session.status === 'ended') {
+          console.log('Session found but already ended');
+          setSessionStatus('ended');
+          setTimeout(() => navigate('/student-login'), 3000);
+          return;
+        }
 
         setSessionId(session.id);
         setSessionStatus(session.status === 'active' ? 'active' : 'waiting');
@@ -360,7 +370,7 @@ function Student() {
 
       } catch (error) {
         console.error('Error initializing session:', error);
-        setSessionStatus('ended');
+        setSessionStatus('no-session');
         sessionInitRoomRef.current = null;
       }
     };
@@ -632,6 +642,7 @@ function Student() {
       channel.publish('student-layer', {
         lines: studentLines,
         clientId,
+        name: studentName,
         meta: {
           base: BASE_CANVAS,
           display: canvasSize,
@@ -641,7 +652,7 @@ function Student() {
     }, 150);
 
     return () => clearTimeout(timer);
-  }, [studentLines, channel, clientId, canvasSize, canvasScale]);
+  }, [studentLines, channel, clientId, canvasSize, canvasScale, studentName]);
 
 
   // Auto-save student work to Supabase every 10 seconds
@@ -918,6 +929,7 @@ function Student() {
       await channel.publish('student-layer', {
         lines: [],
         clientId,
+        name: studentName,
         meta: {
           base: BASE_CANVAS,
           display: canvasSize,
@@ -983,6 +995,38 @@ function Student() {
         </div>
       )}
 
+      {sessionStatus === 'no-session' && (
+        <div className="session-overlay">
+          <div className="session-message">
+            <div className="session-icon waiting">🔍</div>
+            <h2>No session found</h2>
+            <p>There is no active session for room code "{roomId}".</p>
+            <p style={{ marginTop: '0.5rem', fontSize: '0.9rem' }}>
+              Please make sure your teacher has started a session, or verify the room code is correct.
+            </p>
+            <button
+              onClick={() => navigate('/student-login')}
+              style={{
+                marginTop: '1.5rem',
+                padding: '0.75rem 1.5rem',
+                background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                color: 'white',
+                border: 'none',
+                borderRadius: '8px',
+                fontSize: '1rem',
+                fontWeight: '600',
+                cursor: 'pointer',
+                transition: 'transform 0.2s'
+              }}
+              onMouseEnter={(e) => e.target.style.transform = 'scale(1.05)'}
+              onMouseLeave={(e) => e.target.style.transform = 'scale(1)'}
+            >
+              Back to Login
+            </button>
+          </div>
+        </div>
+      )}
+
       {sessionStatus === 'ended' && (
         <div className="session-overlay">
           <div className="session-message">
@@ -999,23 +1043,21 @@ function Student() {
       <div className="student-canvas-container">
         <div className="student-status-bar">
           <div className="student-status-text">
-            <h1>Student Canvas</h1>
+            <h1>
+              Student Canvas
+              {roomId && (
+                <span style={{
+                  marginLeft: '0.75rem',
+                  fontSize: '0.75rem',
+                  fontWeight: '400',
+                  color: 'rgba(0, 0, 0, 0.4)',
+                  letterSpacing: '0.5px'
+                }}>
+                  Session: {roomId}
+                </span>
+              )}
+            </h1>
             <p>{formatClientLabel()}</p>
-            {roomId && (
-              <div className="session-code-badge" style={{
-                marginTop: '0.5rem',
-                padding: '0.25rem 0.75rem',
-                background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                color: 'white',
-                borderRadius: '12px',
-                fontSize: '0.85rem',
-                fontWeight: '600',
-                letterSpacing: '0.5px',
-                display: 'inline-block'
-              }}>
-                Session: {roomId}
-              </div>
-            )}
           </div>
           <div className="student-status-actions">
             {!isMobile && (
