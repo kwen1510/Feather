@@ -90,22 +90,21 @@ function Student() {
 
   const [channel, setChannel] = useState(null);
 
-  // Generate stable clientId that persists across component remounts
+  // Generate stable clientId using crypto.randomUUID for uniqueness
   const [clientId] = useState(() => {
-    // Check if we already have a clientId for this session
-    const sessionKey = `student-clientId-${roomId}-${studentName}`;
-    let existingId = sessionStorage.getItem(sessionKey);
-
-    if (!existingId) {
-      // Generate new clientId
-      existingId = `student-${Math.random().toString(36).substr(2, 9)}`;
-      sessionStorage.setItem(sessionKey, existingId);
-      console.log('🆕 [STUDENT] Generated new clientId:', existingId);
+    // CRITICAL: Generate a truly unique clientId per login session
+    // Use crypto.randomUUID if available, otherwise fallback
+    let uniqueId;
+    if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+      uniqueId = crypto.randomUUID();
     } else {
-      console.log('♻️ [STUDENT] Reusing existing clientId:', existingId);
+      uniqueId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     }
 
-    return existingId;
+    const clientId = `student-${uniqueId.replace(/-/g, '').substring(0, 12)}`;
+    console.log('🆕 [STUDENT LOGIN] Generated unique clientId:', clientId, 'for', studentName);
+
+    return clientId;
   });
 
   const [isConnected, setIsConnected] = useState(false);
@@ -632,9 +631,7 @@ function Student() {
         console.error('❌ [STUDENT] Error leaving presence on unload:', error);
       }
 
-      // Clean up session storage
-      const sessionKey = `student-clientId-${roomId}-${studentName}`;
-      sessionStorage.removeItem(sessionKey);
+      // Set logout flag
       sessionStorage.setItem('student-logout-on-load', 'true');
 
       // Show browser confirmation dialog
@@ -654,9 +651,7 @@ function Student() {
         console.error('❌ [STUDENT] Error leaving presence on pagehide:', error);
       }
 
-      // Clean up session storage
-      const sessionKey = `student-clientId-${roomId}-${studentName}`;
-      sessionStorage.removeItem(sessionKey);
+      // Set logout flag
       sessionStorage.setItem('student-logout-on-load', 'true');
     };
 
@@ -667,7 +662,7 @@ function Student() {
       window.removeEventListener('beforeunload', handleBeforeUnload);
       window.removeEventListener('pagehide', handlePageHide);
     };
-  }, [channel, clientId, roomId, studentName]);
+  }, [channel, clientId]);
 
   // Auto-save student work to Supabase every 10 seconds
   useEffect(() => {
