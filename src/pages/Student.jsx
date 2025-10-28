@@ -495,45 +495,31 @@ function Student() {
                 }
               }
 
-              // Resend current drawing state if student has drawn anything
+              // Publish stroke count after reconnection
               if (linesToSend && linesToSend.length > 0) {
-                console.log('🔄 Resending student drawing state:', linesToSend.length, 'lines');
-                await whiteboardChannel.publish('student-layer', {
-                  lines: linesToSend,
-                  clientId,
-                  name: studentName,
-                  isFullUpdate: true,
-                  meta: {
-                    base: BASE_CANVAS,
-                    display: canvasSizeRef.current,
-                    scale: canvasScaleRef.current,
-                  },
+                console.log('🔄 Publishing stroke count after reconnection:', linesToSend.length, 'lines');
+                await whiteboardChannel.publish('student-stroke-count', {
+                  studentId: studentId,
+                  strokeCount: linesToSend.length,
+                  timestamp: Date.now(),
                 });
-                // Reset counter after sending full state
                 lastPublishedLineCountRef.current = linesToSend.length;
-                console.log('✅ Drawing state resent');
+                console.log('✅ Stroke count published');
               } else {
-                console.log('ℹ️ No drawing state to resend');
+                console.log('ℹ️ No strokes to report');
                 lastPublishedLineCountRef.current = 0;
               }
 
-              // Request current question state
+              // Request current question state + annotations (combined in sync-full-state)
               setTimeout(() => {
                 if (!isActive) return;
-                console.log('🔄 Requesting current question state');
+                console.log('🔄 Requesting full state (question + annotations)');
                 whiteboardChannel.publish('request-current-state', {
                   clientId: clientId,
+                  studentId: studentId, // Include persistent studentId for annotation lookup
                   timestamp: Date.now(),
                 });
-
-                // Also request teacher annotations sync to get latest
-                console.log('🔄 Requesting teacher annotation sync');
-                whiteboardChannel.publish('request-annotation-sync', {
-                  clientId: clientId,
-                  studentId: studentId, // Include persistent studentId
-                  timestamp: Date.now(),
-                });
-              }, 500);
+              }, 300);
             } catch (error) {
               console.error('❌ Error during reconnection:', error);
             }
@@ -624,7 +610,53 @@ function Student() {
           setSharedImage(null);
         });
 
-        // Listen for question state sync (when joining/rejoining)
+        // Listen for full state sync (question + annotations combined - new optimized flow)
+        subscribe('sync-full-state', (message) => {
+          if (!isActive) return;
+          if (message.data.targetClientId === clientId) {
+            const { content = null, questionId, annotations = [] } = message.data;
+
+            console.log('📨 Received sync-full-state:', {
+              questionId,
+              hasContent: !!content,
+              annotationCount: annotations.length
+            });
+
+            setSharedImage(content || null);
+            if (questionId !== undefined) {
+              setCurrentQuestionId(questionId || null);
+            }
+
+            // Apply teacher annotations immediately
+            if (annotations.length > 0) {
+              console.log('✅ Applying', annotations.length, 'teacher annotations from sync');
+              isRemoteUpdate.current = true;
+              setTeacherLines(annotations);
+
+              // Save to IndexedDB
+              if (studentId && sessionId && currentQuestionId) {
+                saveStudentWork(
+                  studentId,
+                  sessionId,
+                  currentQuestionId,
+                  studentLinesRef.current,
+                  {
+                    base: BASE_CANVAS,
+                    display: canvasSizeRef.current,
+                    scale: canvasScaleRef.current,
+                  },
+                  annotations
+                );
+              }
+
+              setTimeout(() => {
+                isRemoteUpdate.current = false;
+              }, 100);
+            }
+          }
+        });
+
+        // Listen for question state sync (fallback for old flow)
         subscribe('sync-question-state', (message) => {
           if (!isActive) return;
           if (message.data.targetClientId === clientId) {
@@ -688,21 +720,15 @@ function Student() {
 
         setChannel(whiteboardChannel);
 
-        // Request current question state after joining
+        // Request current question state + annotations (combined in sync-full-state response)
         setTimeout(() => {
           if (!isActive) return;
           whiteboardChannel.publish('request-current-state', {
             clientId: clientId,
+            studentId: studentId, // Include persistent studentId for annotation lookup
             timestamp: Date.now(),
           });
-
-          // Also request teacher annotations sync
-          whiteboardChannel.publish('request-annotation-sync', {
-            clientId: clientId,
-            studentId: studentId, // Include persistent studentId
-            timestamp: Date.now(),
-          });
-        }, 1000);
+        }, 500);
       } catch (error) {
         console.error('Failed to initialize Ably:', error);
       }
@@ -756,7 +782,7 @@ function Student() {
       });
 
       channel.publish('student-visibility', {
-        clientId: clientId,
+        studentId: studentId, // Use persistent studentId (teacher state keyed by this)
         studentName: studentName,
         isVisible: isVisible,
         timestamp: Date.now()
@@ -871,18 +897,12 @@ function Student() {
           console.log('💾 Saved merged strokes (including new strokes drawn while loading) to IndexedDB');
         }
 
-        // Immediately publish full merged state to teacher
+        // Publish stroke count after loading (not full data)
         setTimeout(() => {
-          channel.publish('student-layer', {
-            lines: finalLines,
-            clientId,
-            name: studentName,
-            isFullUpdate: true,
-            meta: saved.meta || {
-              base: BASE_CANVAS,
-              display: canvasSize,
-              scale: canvasScale,
-            },
+          channel.publish('student-stroke-count', {
+            studentId: studentId,
+            strokeCount: finalLines.length,
+            timestamp: Date.now(),
           });
           lastPublishedLineCountRef.current = finalLines.length;
           isRemoteUpdate.current = false;
@@ -940,17 +960,11 @@ function Student() {
         console.log('✅ Successfully saved to IndexedDB');
       }
 
-      // Always broadcast full current state so teacher recovery is lossless
-      channel.publish('student-layer', {
-        lines: studentLines,
-        clientId,
-        name: studentName,
-        isFullUpdate: true,
-        meta: {
-          base: BASE_CANVAS,
-          display: canvasSize,
-          scale: canvasScale,
-        },
+      // Publish lightweight stroke count (not full stroke data - teacher doesn't need it)
+      channel.publish('student-stroke-count', {
+        studentId: studentId,
+        strokeCount: studentLines.length,
+        timestamp: Date.now(),
       });
 
       // Update last published count
@@ -1232,15 +1246,10 @@ function Student() {
     setStudentLines([]);
 
     if (channel) {
-      await channel.publish('student-layer', {
-        lines: [],
-        clientId,
-        name: studentName,
-        meta: {
-          base: BASE_CANVAS,
-          display: canvasSize,
-          scale: canvasScale,
-        },
+      await channel.publish('student-stroke-count', {
+        studentId: studentId,
+        strokeCount: 0,
+        timestamp: Date.now(),
       });
     }
   };

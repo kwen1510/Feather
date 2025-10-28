@@ -65,7 +65,7 @@ const TeacherDashboard = () => {
   const [sessionStateLoaded, setSessionStateLoaded] = useState(false); // Track if IndexedDB loaded
   const [clientId] = useState(`teacher-${Math.random().toString(36).substring(7)}`);
 
-  // Student management
+  // Student management (keyed by persistent studentId, not volatile clientId)
   const [students, setStudents] = useState(() => {
     // Check if bot parameter is in URL
     const botCount = parseInt(searchParams.get('bot')) || 0;
@@ -73,11 +73,12 @@ const TeacherDashboard = () => {
 
     if (botCount > 0) {
       for (let i = 1; i <= botCount; i++) {
-        const clientId = `bot-${i}`;
-        botStudents[clientId] = {
-          clientId: clientId,
+        const studentId = `bot-student-${i}`;
+        botStudents[studentId] = {
+          studentId: studentId,
+          clientId: `bot-${i}`,
           name: `Bot ${i}`,
-          lines: [],
+          strokeCount: 0, // Track count, not actual strokes
           lastUpdate: Date.now() - (i * 1000),
           isActive: true,
           isFlagged: false,
@@ -580,59 +581,25 @@ const TeacherDashboard = () => {
         // Get channel
         whiteboardChannel = ablyClient.channels.get(`room-${roomId}`);
 
-        // Subscribe to student drawings (full state - used for refresh/undo/redo/clear)
-        whiteboardChannel.subscribe('student-layer', (message) => {
-          isRemoteUpdate.current = true;
+        // Subscribe to lightweight stroke count updates (not full stroke data)
+        whiteboardChannel.subscribe('student-stroke-count', (message) => {
+          const { studentId, strokeCount } = message.data;
+
+          if (!studentId) return;
+
           setStudents(prev => {
-            const existingStudent = prev[message.clientId];
-            const studentName = message.data.name || existingStudent?.name || extractStudentName(message.clientId);
+            // If student doesn't exist yet, don't create entry (wait for presence)
+            if (!prev[studentId]) return prev;
 
             return {
               ...prev,
-              [message.clientId]: {
-                ...(existingStudent || {}),
-                clientId: message.clientId,
-                name: studentName,
-                lines: message.data.lines || [], // REPLACE with full state
-                meta: message.data.meta || existingStudent?.meta || null,
+              [studentId]: {
+                ...prev[studentId],
+                strokeCount: strokeCount || 0,
                 lastUpdate: Date.now(),
-                isActive: true,
-                isFlagged: existingStudent?.isFlagged || false,
               }
             };
           });
-
-          setTimeout(() => {
-            isRemoteUpdate.current = false;
-          }, 100);
-        });
-
-        // Subscribe to incremental student strokes (per-stroke updates)
-        whiteboardChannel.subscribe('student-stroke', (message) => {
-          isRemoteUpdate.current = true;
-          setStudents(prev => {
-            const existingStudent = prev[message.clientId];
-            const currentLines = existingStudent?.lines || [];
-            const studentName = message.data.name || existingStudent?.name || extractStudentName(message.clientId);
-
-            return {
-              ...prev,
-              [message.clientId]: {
-                ...(existingStudent || {}),
-                clientId: message.clientId,
-                name: studentName,
-                lines: [...currentLines, ...message.data.newStrokes], // APPEND new strokes
-                meta: message.data.meta || existingStudent?.meta || null,
-                lastUpdate: Date.now(),
-                isActive: true,
-                isFlagged: existingStudent?.isFlagged || false,
-              }
-            };
-          });
-
-          setTimeout(() => {
-            isRemoteUpdate.current = false;
-          }, 100);
         });
 
         // Listen for presence events (student connect/disconnect)
@@ -642,47 +609,32 @@ const TeacherDashboard = () => {
             const incomingClientId = member.clientId;
             const incomingStudentId = member.data?.studentId;
 
+            if (!incomingStudentId) {
+              console.warn('⚠️ Student joined without persistent studentId:', incomingClientId);
+              return;
+            }
+
             setStudents(prev => {
-              // Check if student already exists with SAME clientId (normal presence update)
-              if (prev[incomingClientId]) {
-                return {
-                  ...prev,
-                  [incomingClientId]: {
-                    ...prev[incomingClientId],
-                    isActive: true,
-                    isVisible: member.data?.isVisible !== false,
-                    lastUpdate: Date.now(),
-                  }
-                };
-              }
+              // Check if student already exists (keyed by persistent studentId)
+              const existingStudent = prev[incomingStudentId];
 
-              // Check if student already exists with SAME studentId but DIFFERENT clientId (student refreshed!)
-              const existingEntry = incomingStudentId ? Object.entries(prev).find(
-                ([cId, student]) => student.studentId === incomingStudentId && cId !== incomingClientId
-              ) : null;
-
-              if (existingEntry) {
-                const [oldClientId, oldStudentData] = existingEntry;
-                console.log('🔄 Student refreshed:', oldClientId, '→', incomingClientId, '(', studentName, ')');
-
-                // Remove old entry, create new entry with transferred state
-                const { [oldClientId]: removed, ...remaining } = prev;
+              if (existingStudent) {
+                // Student reconnected - update clientId and presence
+                console.log('🔄 Student reconnected:', existingStudent.clientId, '→', incomingClientId, '(', studentName, ')');
 
                 // Update selectedStudent if teacher has modal open with this student
-                if (selectedStudent?.clientId === oldClientId) {
+                if (selectedStudent?.studentId === incomingStudentId) {
                   setSelectedStudent({
-                    ...oldStudentData,
+                    ...existingStudent,
                     clientId: incomingClientId,
-                    studentId: incomingStudentId,
                   });
                 }
 
                 return {
-                  ...remaining,
-                  [incomingClientId]: {
-                    ...oldStudentData,           // Transfer all state (lines, flags, etc.)
-                    clientId: incomingClientId,  // Update to new clientId
-                    studentId: incomingStudentId,
+                  ...prev,
+                  [incomingStudentId]: {
+                    ...existingStudent,           // Preserve all state (strokeCount, flags, etc.)
+                    clientId: incomingClientId,  // Update to new clientId for Ably delivery
                     name: studentName,
                     isActive: true,
                     isVisible: member.data?.isVisible !== false,
@@ -692,57 +644,64 @@ const TeacherDashboard = () => {
               }
 
               // New student - show join toast only once per session
-              if (!joinedStudentsRef.current.has(incomingClientId)) {
-                joinedStudentsRef.current.add(incomingClientId);
+              if (!joinedStudentsRef.current.has(incomingStudentId)) {
+                joinedStudentsRef.current.add(incomingStudentId);
                 showToast(`${studentName} joined`, 'success');
               }
 
               return {
                 ...prev,
-                [incomingClientId]: {
+                [incomingStudentId]: {
+                  studentId: incomingStudentId,
                   clientId: incomingClientId,
-                  studentId: incomingStudentId || null,
                   name: studentName,
+                  strokeCount: 0,
                   isActive: true,
                   isVisible: member.data?.isVisible !== false,
                   lastUpdate: Date.now(),
                   isFlagged: false,
-                  lines: [],
                 }
               };
             });
 
-            // Send current question state to the newly joined student
+            // Send current question state + annotations immediately (combined message)
             setTimeout(() => {
-              whiteboardChannel.publish('sync-question-state', {
-                targetClientId: member.clientId,
+              const annotations = teacherAnnotationsRef.current?.[incomingStudentId] || [];
+
+              whiteboardChannel.publish('sync-full-state', {
+                targetClientId: incomingClientId,
                 content: sharedImageRef.current || null,
                 questionId: currentQuestionIdRef.current,
                 questionNumber: questionNumberRef.current,
+                annotations: annotations, // Send annotations immediately, not via separate request
                 timestamp: Date.now(),
               });
-            }, 500);
+
+              if (annotations.length > 0) {
+                console.log('📤 Sent', annotations.length, 'teacher annotations to', studentName);
+              }
+            }, 300);
           }
         });
 
         whiteboardChannel.presence.subscribe('leave', (member) => {
           if (member.clientId !== clientId && member.clientId.includes('student')) {
-            // Remove from joined tracking
-            joinedStudentsRef.current.delete(member.clientId);
+            const leavingStudentId = member.data?.studentId;
 
             setStudents(prev => {
-              // Check if student exists before removing
-              if (!prev[member.clientId]) {
-                return prev;
-              }
+              // Find student by studentId
+              const student = leavingStudentId ? prev[leavingStudentId] : null;
 
-              const student = prev[member.clientId];
+              if (!student) return prev;
+
               const studentName = student?.name || extractStudentName(member.clientId);
-
               showToast(`${studentName} left`, 'info');
 
-              // Remove the student card entirely
-              const { [member.clientId]: removed, ...remaining } = prev;
+              // Remove from joined tracking
+              joinedStudentsRef.current.delete(leavingStudentId);
+
+              // Remove the student card entirely (keyed by studentId)
+              const { [leavingStudentId]: removed, ...remaining } = prev;
               return remaining;
             });
           }
@@ -750,11 +709,16 @@ const TeacherDashboard = () => {
 
         // Listen for student visibility events (immediate notifications)
         whiteboardChannel.subscribe('student-visibility', (message) => {
-          const { clientId: studentClientId, studentName, isVisible } = message.data;
+          const { studentId, studentName, isVisible } = message.data;
+
+          if (!studentId) return;
 
           // Check previous state before updating
           setStudents(prev => {
-            const wasInactive = prev[studentClientId]?.isVisible === false;
+            const student = prev[studentId];
+            if (!student) return prev;
+
+            const wasInactive = student.isVisible === false;
 
             // Show notification based on visibility change
             if (!isVisible) {
@@ -766,8 +730,8 @@ const TeacherDashboard = () => {
 
             return {
               ...prev,
-              [studentClientId]: {
-                ...(prev[studentClientId] || {}),
+              [studentId]: {
+                ...student,
                 isVisible: isVisible,
                 lastVisibilityChange: Date.now(),
               }
@@ -780,40 +744,23 @@ const TeacherDashboard = () => {
           setSharedImage(message.data);
         });
 
-        // Listen for students requesting current question state
+        // Listen for students requesting current question state (fallback)
         whiteboardChannel.subscribe('request-current-state', (message) => {
-          // Send current question state to the requesting student
+          const requestingStudentId = message.data?.studentId;
+
+          // Send current question state + annotations to the requesting student
           setTimeout(() => {
-            whiteboardChannel.publish('sync-question-state', {
+            const annotations = teacherAnnotationsRef.current?.[requestingStudentId] || [];
+
+            whiteboardChannel.publish('sync-full-state', {
               targetClientId: message.clientId,
               content: sharedImageRef.current || null,
               questionId: currentQuestionIdRef.current,
               questionNumber: questionNumberRef.current,
+              annotations: annotations,
               timestamp: Date.now(),
             });
           }, 100);
-        });
-
-        // Listen for students requesting teacher annotation sync
-        whiteboardChannel.subscribe('request-annotation-sync', (message) => {
-          const requestingClientId = message.clientId;
-          const requestingStudentId = message.data?.studentId; // Persistent studentId
-
-          // Get current annotations using persistent studentId
-          const currentAnnotations = teacherAnnotationsRef.current || {};
-          const studentAnnotations = currentAnnotations[requestingStudentId] || [];
-
-          // Send annotations back to the student's current clientId
-          setTimeout(() => {
-            if (studentAnnotations.length > 0) {
-              whiteboardChannel.publish('teacher-annotation', {
-                targetStudentId: requestingClientId, // Use clientId for Ably delivery
-                annotations: studentAnnotations,
-                teacherId: clientId,
-                timestamp: Date.now(),
-              });
-            }
-          }, 150);
         });
 
         // Enter presence with teacher role
@@ -832,19 +779,26 @@ const TeacherDashboard = () => {
         existingMembers.forEach(member => {
           if (member.clientId !== clientId && member.clientId.includes('student')) {
             const studentName = member.data?.name || extractStudentName(member.clientId);
-            const existingStudent = students[member.clientId] || {};
+            const memberStudentId = member.data?.studentId;
 
-            // Merge: Keep restored data (lines, etc.), update presence data (isActive, etc.)
-            currentStudents[member.clientId] = {
-              ...existingStudent, // Keep all restored data (lines, studentId, etc.)
-              clientId: member.clientId,
-              studentId: member.data?.studentId || existingStudent.studentId || null, // Extract studentId!
+            if (!memberStudentId) {
+              console.warn('⚠️ Student in presence without studentId:', member.clientId);
+              return;
+            }
+
+            const existingStudent = students[memberStudentId] || {};
+
+            // Merge: Keep restored data (strokeCount, etc.), update presence data (clientId, isActive, etc.)
+            currentStudents[memberStudentId] = {
+              ...existingStudent, // Keep all restored data (strokeCount, studentId, flags, etc.)
+              studentId: memberStudentId,
+              clientId: member.clientId, // Update to current clientId
               name: studentName,
               isActive: true,
               isVisible: member.data?.isVisible !== false,
               lastUpdate: Date.now(),
               isFlagged: existingStudent.isFlagged || false,
-              // lines preserved from existingStudent via spread
+              strokeCount: existingStudent.strokeCount || 0,
             };
           }
         });
@@ -917,19 +871,19 @@ const TeacherDashboard = () => {
     };
   }, [roomId, clientId, sessionStateLoaded]); // Wait for IndexedDB to load first
 
-  // Auto-save session state to IndexedDB every 10 seconds
+  // Auto-save session state to IndexedDB every 10 seconds (metadata only, no stroke data)
   useEffect(() => {
     if (!sessionId) return;
 
     const interval = setInterval(async () => {
       try {
         await saveSessionState(sessionId, {
-          students: students,
+          students: students, // Only contains metadata (studentId, name, strokeCount, flags) - no stroke data
           questionNumber: questionNumber,
           currentQuestionId: currentQuestionId,
           sharedImage: sharedImage,
         });
-        console.log('💾 Auto-saved session state to IndexedDB');
+        console.log('💾 Auto-saved session metadata to IndexedDB');
       } catch (error) {
         console.error('❌ Failed to auto-save session state:', error);
       }
@@ -967,7 +921,7 @@ const TeacherDashboard = () => {
 
   // Handle opening annotation modal
   const handleCardClick = (student) => {
-    setSelectedStudent(students[student.clientId] || student);
+    setSelectedStudent(students[student.studentId] || student);
   };
 
   // Handle closing annotation modal
@@ -1028,7 +982,7 @@ const TeacherDashboard = () => {
     });
 
     setSelectedStudent(prev =>
-      prev && prev.clientId === studentId ? { ...prev, isFlagged: !prev.isFlagged } : prev
+      prev && prev.studentId === studentId ? { ...prev, isFlagged: !prev.isFlagged } : prev
     );
   };
 
@@ -1323,71 +1277,43 @@ const TeacherDashboard = () => {
 
       // BEFORE moving to next question: Save all current work to Supabase
       if (currentQuestionId) {
-        console.log('💾 Saving all work from Q', questionNumber, 'to Supabase before moving to next question');
+        console.log('💾 Saving teacher annotations from Q', questionNumber, 'to Supabase before moving to next question');
 
-        // Batch save all student work and teacher annotations
+        // Save teacher annotations to Supabase
+        // Note: Students save their own work, so teacher only needs to save annotations
         const savePromises = [];
 
-        for (const [clientId, student] of Object.entries(students)) {
-          if (student.lines && student.lines.length > 0) {
-            // Get participant record for this student
-            const { data: participant } = await supabase
-              .from('participants')
-              .select('id')
-              .eq('session_id', sessionId)
-              .eq('client_id', clientId)
-              .eq('role', 'student')
-              .maybeSingle();
-
-            if (participant) {
-              // Use persistent studentId to get annotations (not clientId)
-              const teacherAnno = teacherAnnotations[student.studentId] || [];
-
-              const savePromise = supabase
-                .from('annotations')
-                .upsert({
-                  session_id: sessionId,
-                  participant_id: participant.id,
-                  question_id: currentQuestionId,
-                  student_lines: student.lines,
-                  teacher_annotations: teacherAnno,
-                  last_updated_at: new Date().toISOString(),
-                }, {
-                  onConflict: 'participant_id,question_id'
-                });
-
-              savePromises.push(savePromise);
-            }
-          }
-        }
-
-        // Also save teacher annotations for students who haven't drawn yet
         for (const [targetStudentId, annotations] of Object.entries(teacherAnnotations)) {
-          if (!students[targetStudentId]?.lines?.length && annotations.length > 0) {
-            // Find participant
-            const { data: participant } = await supabase
-              .from('participants')
-              .select('id')
-              .eq('session_id', sessionId)
-              .eq('client_id', targetStudentId)
-              .eq('role', 'student')
-              .maybeSingle();
+          if (annotations.length > 0) {
+            // Find participant by persistent studentId
+            // Note: participant.client_id may be outdated after student refresh, but participant_id is stable
+            const student = students[targetStudentId];
 
-            if (participant) {
-              const savePromise = supabase
-                .from('annotations')
-                .upsert({
-                  session_id: sessionId,
-                  participant_id: participant.id,
-                  question_id: currentQuestionId,
-                  student_lines: [],
-                  teacher_annotations: annotations,
-                  last_updated_at: new Date().toISOString(),
-                }, {
-                  onConflict: 'participant_id,question_id'
-                });
+            if (student) {
+              const { data: participant } = await supabase
+                .from('participants')
+                .select('id')
+                .eq('session_id', sessionId)
+                .eq('client_id', student.clientId) // Use current clientId from state
+                .eq('role', 'student')
+                .maybeSingle();
 
-              savePromises.push(savePromise);
+              if (participant) {
+                const savePromise = supabase
+                  .from('annotations')
+                  .upsert({
+                    session_id: sessionId,
+                    participant_id: participant.id,
+                    question_id: currentQuestionId,
+                    student_lines: [], // Students save their own lines
+                    teacher_annotations: annotations,
+                    last_updated_at: new Date().toISOString(),
+                  }, {
+                    onConflict: 'participant_id,question_id'
+                  });
+
+                savePromises.push(savePromise);
+              }
             }
           }
         }
@@ -1396,10 +1322,10 @@ const TeacherDashboard = () => {
         if (savePromises.length > 0) {
           try {
             await Promise.all(savePromises);
-            console.log(`✅ Saved work for ${savePromises.length} students to Supabase`);
+            console.log(`✅ Saved annotations for ${savePromises.length} students to Supabase`);
           } catch (saveError) {
-            console.error('❌ Failed to save some work to Supabase:', saveError);
-            // Continue anyway - work is still in IndexedDB
+            console.error('❌ Failed to save some annotations to Supabase:', saveError);
+            // Continue anyway - annotations are still in IndexedDB
           }
         }
       }
@@ -1614,7 +1540,7 @@ const TeacherDashboard = () => {
     return allStudents.filter(student => {
       const matchesSearch = !query
         ? true
-        : (student.name || student.clientId).toLowerCase().includes(query);
+        : (student.name || student.studentId).toLowerCase().includes(query);
 
       const matchesFlag =
         flagFilter === 'all' ||
@@ -1632,7 +1558,7 @@ const TeacherDashboard = () => {
   const filteredStudents = getFilteredStudents();
   const activeCount = studentsList.filter(s => s.isActive).length;
   const selectedStudentData = selectedStudent
-    ? students[selectedStudent.clientId] || selectedStudent
+    ? students[selectedStudent.studentId] || selectedStudent
     : null;
   const isPositiveImageMessage = imageMessage
     ? !/fail|no file/i.test(imageMessage)
@@ -1951,10 +1877,10 @@ const TeacherDashboard = () => {
                 }}
               >
                 {filteredStudents
-                  .filter(student => student && student.clientId)
+                  .filter(student => student && student.studentId && student.clientId)
                   .map(student => (
                     <StudentCard
-                      key={student.clientId}
+                      key={student.studentId}
                       student={student}
                       onClick={handleCardClick}
                       onToggleFlag={toggleFlag}
