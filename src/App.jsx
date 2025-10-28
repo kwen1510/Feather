@@ -6,7 +6,6 @@ import StudentLogin from './pages/StudentLogin';
 import TeacherDashboard from './pages/TeacherDashboard';
 import TestStudent from './pages/TestStudent';
 import TestTeacher from './pages/TestTeacher';
-import TestControl from './pages/TestControl';
 
 function App() {
   return (
@@ -18,7 +17,6 @@ function App() {
         <Route path="/teacher" element={<TeacherDashboard />} />
         <Route path="/test/student" element={<TestStudent />} />
         <Route path="/test/teacher" element={<TestTeacher />} />
-        <Route path="/test/control" element={<TestControl />} />
       </Routes>
     </Router>
   );
