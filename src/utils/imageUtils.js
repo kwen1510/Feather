@@ -36,9 +36,10 @@ export const resizeAndCompressImage = async (
         resolve(image);
       };
 
-      image.onerror = () => {
+      image.onerror = (err) => {
         URL.revokeObjectURL(url);
-        reject(new Error('Failed to load image'));
+        console.error('📸 Image load error:', err);
+        reject(new Error(`Failed to load image: ${file.name}. File may be corrupted or in unsupported format.`));
       };
 
       image.src = url;
@@ -67,18 +68,24 @@ export const resizeAndCompressImage = async (
 
   // Convert to blob
   const blob = await new Promise((resolve, reject) => {
-    canvas.toBlob(
-      (result) => {
-        if (result) {
-          console.log('📸 Compressed to:', result.size, 'bytes');
-          resolve(result);
-        } else {
-          reject(new Error('Failed to compress image'));
-        }
-      },
-      'image/jpeg',
-      quality
-    );
+    try {
+      canvas.toBlob(
+        (result) => {
+          if (result) {
+            console.log('📸 Compressed to:', result.size, 'bytes');
+            resolve(result);
+          } else {
+            console.error('📸 Canvas toBlob returned null');
+            reject(new Error('Failed to compress image. Canvas may be too large or device out of memory.'));
+          }
+        },
+        'image/jpeg',
+        quality
+      );
+    } catch (err) {
+      console.error('📸 Canvas toBlob error:', err);
+      reject(new Error(`Failed to compress image: ${err.message}`));
+    }
   });
 
   // Convert to data URL
@@ -88,9 +95,9 @@ export const resizeAndCompressImage = async (
       console.log('📸 Data URL created, length:', reader.result.length);
       resolve(reader.result);
     };
-    reader.onerror = () => {
-      console.error('📸 Failed to create data URL');
-      reject(reader.error);
+    reader.onerror = (err) => {
+      console.error('📸 Failed to create data URL:', err, reader.error);
+      reject(new Error(`Failed to create data URL: ${reader.error?.message || 'Unknown FileReader error'}`));
     };
     reader.readAsDataURL(blob);
   });

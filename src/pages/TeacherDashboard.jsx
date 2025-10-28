@@ -702,9 +702,36 @@ const TeacherDashboard = () => {
       return;
     }
 
+    // Log file details for debugging
+    const fileSizeMB = (file.size / (1024 * 1024)).toFixed(2);
+    console.log('📸 File selected:', {
+      name: file.name,
+      type: file.type,
+      size: `${fileSizeMB}MB (${file.size} bytes)`,
+      lastModified: new Date(file.lastModified).toISOString()
+    });
+
+    // Validate file type
+    if (!file.type.startsWith('image/')) {
+      const errorMsg = `❌ Invalid file type: ${file.type || 'unknown'}. Please select an image file (JPG, PNG, etc.)`;
+      setImageMessage(errorMsg);
+      console.error(errorMsg);
+      showToast('Invalid file type', 'error');
+      return;
+    }
+
+    // Validate file size (25MB limit)
+    const maxSizeMB = 25;
+    if (file.size > maxSizeMB * 1024 * 1024) {
+      const errorMsg = `❌ File too large: ${fileSizeMB}MB. Maximum size is ${maxSizeMB}MB.`;
+      setImageMessage(errorMsg);
+      console.error(errorMsg);
+      showToast('File too large', 'error');
+      return;
+    }
 
     setIsUploadingImage(true);
-    setImageMessage('Processing image...');
+    setImageMessage(`Processing ${file.name} (${fileSizeMB}MB)...`);
 
     try {
       const { dataUrl, width, height, size } = await resizeAndCompressImage(file);
@@ -716,11 +743,37 @@ const TeacherDashboard = () => {
         timestamp: Date.now(),
       };
       setStagedImage(payload);
-      setImageMessage(`Image ready (${width}×${height}, ${Math.round(size/1024)}KB)`);
+      setImageMessage(`✅ Image ready (${width}×${height}, ${Math.round(size/1024)}KB)`);
+      console.log('✅ Image processed successfully');
     } catch (error) {
-      console.error('❌ [TEACHER] Image upload failed:', error);
-      setImageMessage(`Upload failed: ${error.message || 'Unknown error'}. Try a different image.`);
-      showToast('Image upload failed', 'error');
+      const errorDetails = {
+        fileName: file.name,
+        fileType: file.type,
+        fileSize: `${fileSizeMB}MB`,
+        errorMessage: error.message || 'Unknown error',
+        errorStack: error.stack
+      };
+
+      console.error('❌ [TEACHER] Image upload failed:', errorDetails);
+
+      // Create detailed error message
+      let detailedError = `❌ Upload failed: ${error.message || 'Unknown error'}\n`;
+      detailedError += `File: ${file.name} (${file.type})\n`;
+      detailedError += `Size: ${fileSizeMB}MB\n`;
+
+      // Check for specific error types
+      if (error.message?.includes('load')) {
+        detailedError += 'Error loading image. The file may be corrupted or in an unsupported format.';
+      } else if (error.message?.includes('compress')) {
+        detailedError += 'Error compressing image. Try a different image or smaller file.';
+      } else if (error.message?.includes('memory') || error.message?.includes('allocation')) {
+        detailedError += 'Image too large for device memory. Try a smaller image.';
+      } else {
+        detailedError += 'Try a different image or format (JPG/PNG recommended).';
+      }
+
+      setImageMessage(detailedError);
+      showToast(`Upload failed: ${error.message}`, 'error');
     } finally {
       setIsUploadingImage(false);
     }
