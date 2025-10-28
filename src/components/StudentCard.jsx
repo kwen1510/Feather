@@ -134,9 +134,9 @@ const StudentCard = ({ student, onClick, onToggleFlag, teacherAnnotations = [], 
             {student.isVisible === false && student.isActive && (
               <span
                 className="visibility-indicator away"
-                title="Student switched away from tab"
+                title="Student is distracted (switched away from tab)"
               >
-                👁️‍🗨️
+                ⚠️
               </span>
             )}
           </div>

@@ -77,6 +77,7 @@ const TeacherDashboard = () => {
   const [teacherAnnotations, setTeacherAnnotations] = useState({}); // { studentId: [annotations] }
   const [searchQuery, setSearchQuery] = useState('');
   const [flagFilter, setFlagFilter] = useState('all'); // all | flagged
+  const [distractedFilter, setDistractedFilter] = useState('all'); // all | distracted
   const [hideNames, setHideNames] = useState(() => {
     const saved = localStorage.getItem('teacherDashboardHideNames');
     return saved ? JSON.parse(saved) : false;
@@ -1034,7 +1035,11 @@ const TeacherDashboard = () => {
         flagFilter === 'all' ||
         (flagFilter === 'flagged' && student.isFlagged);
 
-      return matchesSearch && matchesFlag;
+      const matchesDistracted =
+        distractedFilter === 'all' ||
+        (distractedFilter === 'distracted' && student.isVisible === false && student.isActive);
+
+      return matchesSearch && matchesFlag && matchesDistracted;
     });
   };
 
@@ -1138,6 +1143,15 @@ const TeacherDashboard = () => {
                 onClick={() => setFlagFilter(prev => (prev === 'flagged' ? 'all' : 'flagged'))}
               >
                 Flagged only
+              </button>
+
+              <button
+                type="button"
+                className={`chip-button ${distractedFilter === 'distracted' ? 'active' : ''}`}
+                onClick={() => setDistractedFilter(prev => (prev === 'distracted' ? 'all' : 'distracted'))}
+                title="Show only distracted students (switched away from tab)"
+              >
+                ⚠️ Distracted only
               </button>
 
               <div className="cards-select">
