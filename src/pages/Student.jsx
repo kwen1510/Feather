@@ -124,7 +124,6 @@ function Student() {
 
   // Stroke restoration state
   const [isRestoringStrokes, setIsRestoringStrokes] = useState(false);
-  const strokeRestorationTimeoutRef = useRef(null);
 
   // Redirect to login if missing name or room - DO THIS FIRST before any initialization
   useEffect(() => {
@@ -280,15 +279,6 @@ function Student() {
     return () => {
       if (animationFrameRef.current) {
         cancelAnimationFrame(animationFrameRef.current);
-      }
-    };
-  }, []);
-
-  // Cleanup restoration timeout on unmount
-  useEffect(() => {
-    return () => {
-      if (strokeRestorationTimeoutRef.current) {
-        clearTimeout(strokeRestorationTimeoutRef.current);
       }
     };
   }, []);

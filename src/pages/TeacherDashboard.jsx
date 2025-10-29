@@ -716,10 +716,14 @@ const TeacherDashboard = () => {
               if (!student) return prev;
 
               const studentName = student?.name || extractStudentName(member.clientId);
-              showToast(`${studentName} left`, 'info');
 
-              // Remove from joined tracking
-              joinedStudentsRef.current.delete(leavingStudentId);
+              // Only show "left" toast if they actually joined this session (prevent spam on refresh)
+              if (joinedStudentsRef.current.has(leavingStudentId)) {
+                showToast(`${studentName} left`, 'info');
+              }
+
+              // DON'T remove from joinedStudentsRef - we want to track they've been in this session
+              // This prevents duplicate "joined" toasts if they reconnect
 
               // Remove the student card entirely (keyed by studentId)
               const { [leavingStudentId]: removed, ...remaining } = prev;

@@ -112,18 +112,19 @@ const server = createServer(async (req, res) => {
       const studentKey = `strokes:${sessionId}:${questionId}:${userId}:student`;
       const teacherKey = `strokes:${sessionId}:${questionId}:${userId}:teacher`;
 
-      const [studentStrokesStr, teacherStrokesStr] = await Promise.all([
+      const [studentStrokes, teacherStrokes] = await Promise.all([
         redis.get(studentKey),
         redis.get(teacherKey)
       ]);
 
-      const studentStrokes = studentStrokesStr ? JSON.parse(studentStrokesStr) : [];
-      const teacherStrokes = teacherStrokesStr ? JSON.parse(teacherStrokesStr) : [];
+      // Upstash Redis client automatically deserializes JSON, no need to parse
+      const finalStudentStrokes = studentStrokes || [];
+      const finalTeacherStrokes = teacherStrokes || [];
 
-      console.log(`📂 Loaded ${studentStrokes.length} student strokes + ${teacherStrokes.length} teacher strokes for user ${userId}`);
+      console.log(`📂 Loaded ${finalStudentStrokes.length} student strokes + ${finalTeacherStrokes.length} teacher strokes for user ${userId}`);
 
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ studentStrokes, teacherStrokes }));
+      res.end(JSON.stringify({ studentStrokes: finalStudentStrokes, teacherStrokes: finalTeacherStrokes }));
     } catch (err) {
       console.error('Load strokes error:', err);
       res.writeHead(500, { 'Content-Type': 'application/json' });
