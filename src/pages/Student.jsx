@@ -124,6 +124,7 @@ function Student() {
 
   // Stroke restoration state
   const [isRestoringStrokes, setIsRestoringStrokes] = useState(false);
+  const hasLoadedFromRedisRef = useRef(false); // Track if we've loaded once
 
   // Redirect to login if missing name or room - DO THIS FIRST before any initialization
   useEffect(() => {
@@ -474,6 +475,7 @@ function Student() {
         ablyClient.connection.on('connected', async () => {
           if (!isActive) return;
           setIsConnected(true);
+          console.log('✅ Student connected to Ably');
 
           // Handle reconnection after initial connection
           if (hasInitiallyConnected && whiteboardChannel) {
@@ -584,36 +586,7 @@ function Student() {
           }
         });
 
-        // Listen for teacher shared images
-        subscribe('teacher-image', (message) => {
-          if (!isActive) return;
-          setSharedImage({
-            dataUrl: message.data?.dataUrl,
-            width: message.data?.width,
-            height: message.data?.height,
-            timestamp: message.data?.timestamp,
-          });
-        });
-
-        // Listen for teacher templates
-        subscribe('teacher-template', (message) => {
-          if (!isActive) return;
-          setSharedImage({
-            dataUrl: message.data?.dataUrl,
-            width: message.data?.width,
-            height: message.data?.height,
-            type: message.data?.type,
-            timestamp: message.data?.timestamp,
-          });
-        });
-
-        // Listen for teacher clear command
-        subscribe('teacher-clear', () => {
-          if (!isActive) return;
-          setSharedImage(null);
-        });
-
-        // Listen for full state sync (question + annotations combined - new optimized flow)
+        // Listen for full state sync (question + annotations combined - optimized flow)
         subscribe('sync-full-state', (message) => {
           if (!isActive) return;
           if (message.data.targetClientId === clientId) {
@@ -659,26 +632,25 @@ function Student() {
           }
         });
 
-        // Listen for question state sync (fallback for old flow)
-        subscribe('sync-question-state', (message) => {
-          if (!isActive) return;
-          if (message.data.targetClientId === clientId) {
-            const { content = null, questionId } = message.data;
-            setSharedImage(content || null);
-            if (questionId !== undefined) {
-              setCurrentQuestionId(questionId || null);
-            }
-          }
-        });
-
         // Listen for clear all drawings command (when teacher sends new content)
         subscribe('clear-all-drawings', (message) => {
           if (!isActive) return;
 
+          console.log('📨 Received clear-all-drawings with content:', message.data);
+
+          // Update question ID
           if (message.data?.questionId) {
             setCurrentQuestionId(message.data.questionId);
           }
 
+          // Update shared image/content if provided
+          if (message.data?.content) {
+            setSharedImage(message.data.content);
+          } else {
+            setSharedImage(null); // Clear for blank canvas
+          }
+
+          // Clear all strokes
           isRemoteUpdate.current = true;
           setStudentLines([]);
           setTeacherLines([]);
@@ -765,7 +737,7 @@ function Student() {
         }
       }
     };
-  }, [clientId, roomId, studentName, navigate, studentId, sessionId, currentQuestionId]);
+  }, [clientId, roomId, studentName, navigate, studentId]); // Removed sessionId and currentQuestionId to prevent reconnects
 
   // Track tab visibility and notify teacher
   useEffect(() => {
@@ -846,12 +818,15 @@ function Student() {
     };
   }, [toolbarPosition, isMobile]);
 
-  // Load saved work from Redis when question changes
+  // Load saved work from Redis ONLY on initial mount (page refresh)
+  // Question changes are handled by Ably real-time messages, no need to reload
   useEffect(() => {
     if (!studentId || !sessionId || !currentQuestionId || !channel) return;
+    if (hasLoadedFromRedisRef.current) return; // Only load once
 
     const loadSavedWork = async () => {
-      console.log('🔄 Loading strokes from Redis for question:', currentQuestionId);
+      console.log('🔄 Initial load: Loading strokes from Redis for question:', currentQuestionId);
+      hasLoadedFromRedisRef.current = true; // Mark as loaded
 
       // Show loading state
       setIsRestoringStrokes(true);
@@ -932,7 +907,7 @@ function Student() {
     };
 
     loadSavedWork();
-  }, [studentId, sessionId, currentQuestionId, channel, clientId, studentName, canvasSize, canvasScale]);
+  }, [studentId, sessionId, currentQuestionId, channel]);
 
   // Sync student lines to Ably, IndexedDB, and Redis (per-stroke)
   useEffect(() => {

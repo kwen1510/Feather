@@ -575,6 +575,7 @@ const TeacherDashboard = () => {
 
         ablyClient.connection.on('connected', () => {
           setIsConnected(true);
+          console.log('✅ Teacher connected to Ably');
         });
 
         ablyClient.connection.on('disconnected', () => {
@@ -1282,12 +1283,20 @@ const TeacherDashboard = () => {
   };
 
   const handleSendToClass = async () => {
-    if (!channel || !sessionId) {
-      console.error('Cannot send: channel or sessionId missing', { channel: !!channel, sessionId });
+    if (!channel || !sessionId || !isConnected) {
+      console.error('Cannot send: channel or sessionId missing', { channel: !!channel, sessionId, isConnected });
       setImageMessage('Error: Not connected properly. Please refresh the page.');
       showToast('Failed to send: Connection issue', 'error');
       return;
     }
+
+    // Prevent double-send
+    if (imageMessage.includes('sending')) {
+      console.log('Already sending, ignoring duplicate click');
+      return;
+    }
+
+    setImageMessage('Sending question to class...');
 
     try {
       // If this is the first content being sent, start the session
@@ -1427,10 +1436,20 @@ const TeacherDashboard = () => {
       setCurrentQuestionId(question.id);
       currentQuestionIdRef.current = question.id;
 
-      // Clear all student drawings and teacher annotations
+      // Prepare content for the message
+      let content = null;
+      if (prepTab === 'templates' && stagedTemplate) {
+        content = stagedTemplate;
+      } else if (prepTab === 'image' && stagedImage) {
+        content = stagedImage;
+      }
+      // For blank, content stays null
+
+      // Clear all student drawings and teacher annotations + send content in ONE message
       await channel.publish('clear-all-drawings', {
         timestamp: Date.now(),
         questionId: question.id,
+        content: content, // Include content directly
       });
 
       // Clear local state
@@ -1446,27 +1465,20 @@ const TeacherDashboard = () => {
       });
       setTeacherAnnotations({}); // Clear all teacher annotations
 
-      // Send content to students
+      // Update local shared image state
       if (prepTab === 'blank') {
-        // Clear any existing template/image
-        await channel.publish('teacher-clear', { timestamp: Date.now() });
         setSharedImage(null);
         setStagedTemplate(null);
         setImageMessage(`Question ${newQuestionNumber}: Blank canvas sent to all students.`);
-        showToast(`Question ${newQuestionNumber} sent!`, 'success');
       } else if (prepTab === 'templates' && stagedTemplate) {
-        // Send template
-        await channel.publish('teacher-template', stagedTemplate);
-        setSharedImage(stagedTemplate); // Store as shared content
+        setSharedImage(stagedTemplate);
         setImageMessage(`Question ${newQuestionNumber}: Template sent to all students.`);
-        showToast(`Question ${newQuestionNumber} sent!`, 'success');
       } else if (prepTab === 'image' && stagedImage) {
-        // Send image
-        await channel.publish('teacher-image', stagedImage);
         setSharedImage(stagedImage);
         setImageMessage(`Question ${newQuestionNumber}: Image sent to all students.`);
-        showToast(`Question ${newQuestionNumber} sent!`, 'success');
       }
+
+      showToast(`Question ${newQuestionNumber} sent!`, 'success');
     } catch (error) {
       console.error('Failed to send to class:', error);
       setImageMessage('Failed to send. Please try again.');
