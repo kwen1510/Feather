@@ -718,77 +718,6 @@ function Student() {
           navigate('/student-login');
         });
 
-        // Listen for teacher stroke requests
-        subscribe('request-student-strokes', (message) => {
-          if (!isActive) return;
-
-          // Check if this request is for us (by clientId or studentId)
-          const { targetClientId, targetStudentId } = message.data || {};
-          if (targetClientId === clientId || targetStudentId === studentId) {
-            console.log('📨 Received request-student-strokes from teacher');
-
-            // Respond with our current strokes
-            const strokes = studentLinesRef.current || [];
-            whiteboardChannel.publish('student-strokes-response', {
-              clientId: clientId,
-              studentId: studentId,
-              strokes: strokes,
-              timestamp: Date.now()
-            });
-
-            console.log('📤 Sent', strokes.length, 'strokes to teacher');
-          }
-        });
-
-        // Listen for teacher stroke responses
-        subscribe('teacher-strokes-response', (message) => {
-          if (!isActive) return;
-
-          // Check if this response is for us
-          const { targetClientId, targetStudentId, strokes } = message.data || {};
-          if (targetClientId === clientId || targetStudentId === studentId) {
-            console.log('📨 Received teacher-strokes-response:', strokes?.length || 0, 'strokes');
-
-            // Clear restoration timeout
-            if (strokeRestorationTimeoutRef.current) {
-              clearTimeout(strokeRestorationTimeoutRef.current);
-              strokeRestorationTimeoutRef.current = null;
-            }
-
-            // Apply teacher strokes
-            if (strokes && strokes.length > 0) {
-              isRemoteUpdate.current = true;
-              setTeacherLines(strokes);
-
-              // Save to IndexedDB
-              if (studentId && sessionId && currentQuestionId) {
-                saveStudentWork(
-                  studentId,
-                  sessionId,
-                  currentQuestionId,
-                  studentLinesRef.current,
-                  {
-                    base: BASE_CANVAS,
-                    display: canvasSizeRef.current,
-                    scale: canvasScaleRef.current,
-                  },
-                  strokes
-                ).catch(err => {
-                  console.error('❌ Failed to save teacher strokes to IndexedDB:', err);
-                });
-              }
-
-              setTimeout(() => {
-                isRemoteUpdate.current = false;
-              }, 100);
-            }
-
-            // Hide loading state
-            setIsRestoringStrokes(false);
-            console.log('✅ Stroke restoration complete');
-          }
-        });
-
         // Enter presence with student name and initial visibility status
         await whiteboardChannel.presence.enter({
           name: studentName,
@@ -927,145 +856,105 @@ function Student() {
     };
   }, [toolbarPosition, isMobile]);
 
-  // Sync student lines to Ably
-  // Load saved work from IndexedDB when question changes
+  // Load saved work from Redis when question changes
   useEffect(() => {
     if (!studentId || !sessionId || !currentQuestionId || !channel) return;
 
     const loadSavedWork = async () => {
-      console.log('🔄 Checking IndexedDB memory for question:', currentQuestionId);
+      console.log('🔄 Loading strokes from Redis for question:', currentQuestionId);
 
       // Show loading state
       setIsRestoringStrokes(true);
 
-      // Capture current lines in case student already started drawing
-      const currentLines = studentLinesRef.current || [];
-      const hasDrawnWhileLoading = currentLines.length > 0;
-
-      // Reset counter for new question (will be updated after merge)
+      // Reset counter for new question
       lastPublishedLineCountRef.current = 0;
 
-      const saved = await loadStudentWork(studentId, sessionId, currentQuestionId);
+      try {
+        // Fetch strokes from Redis
+        const response = await fetch(
+          `/api/strokes/load?sessionId=${sessionId}&questionId=${currentQuestionId}&userId=${studentId}`
+        );
 
-      if (saved?.lines && saved.lines.length > 0) {
-        console.log('📂 ✅ LOADED FROM INDEXEDDB MEMORY:', saved.lines.length, 'lines restored for question', currentQuestionId);
-
-        // Merge: Keep saved lines + append any new lines drawn while loading
-        let finalLines = saved.lines;
-        if (hasDrawnWhileLoading) {
-          console.log('🔀 Student drew', currentLines.length, 'new strokes while IndexedDB was loading - merging with saved', saved.lines.length, 'strokes');
-          finalLines = [...saved.lines, ...currentLines];
-          console.log('✅ Merged result:', finalLines.length, 'total strokes');
+        if (!response.ok) {
+          throw new Error('Failed to load strokes from Redis');
         }
 
+        const data = await response.json();
+        const { studentStrokes = [], teacherStrokes = [] } = data;
+
+        console.log('📂 Loaded from Redis:', studentStrokes.length, 'student strokes +', teacherStrokes.length, 'teacher strokes');
+
+        // Apply strokes to canvas
         isRemoteUpdate.current = true;
-        setStudentLines(finalLines);
+        setStudentLines(studentStrokes);
+        setTeacherLines(teacherStrokes);
 
-        // Also restore teacher annotations if they exist
-        if (saved.teacherAnnotations && saved.teacherAnnotations.length > 0) {
-          console.log('👨‍🏫 Restored', saved.teacherAnnotations.length, 'teacher annotation strokes from IndexedDB');
-          setTeacherLines(saved.teacherAnnotations);
-        }
-
-        // Save merged result to IndexedDB (especially if we merged new strokes)
-        if (hasDrawnWhileLoading) {
+        // Also save to IndexedDB as backup
+        if (studentStrokes.length > 0 || teacherStrokes.length > 0) {
           await saveStudentWork(
             studentId,
             sessionId,
             currentQuestionId,
-            finalLines,
-            saved.meta || {
-              base: BASE_CANVAS,
-              display: canvasSize,
-              scale: canvasScale,
-            },
-            saved.teacherAnnotations || []
-          );
-          console.log('💾 Saved merged strokes (including new strokes drawn while loading) to IndexedDB');
-        }
-
-        // Publish stroke count after loading (not full data)
-        setTimeout(() => {
-          channel.publish('student-stroke-count', {
-            studentId: studentId,
-            strokeCount: finalLines.length,
-            timestamp: Date.now(),
-          });
-          lastPublishedLineCountRef.current = finalLines.length;
-          isRemoteUpdate.current = false;
-          console.log('📤 Published', finalLines.length, 'strokes to teacher (', saved.lines.length, 'from IndexedDB +', currentLines.length, 'new)');
-        }, 100);
-
-        // If we have saved teacher annotations, use them and hide loading immediately
-        if (saved.teacherAnnotations && saved.teacherAnnotations.length > 0) {
-          setIsRestoringStrokes(false);
-          console.log('✅ Using cached teacher annotations, no need to request');
-        } else {
-          // Request teacher strokes
-          console.log('🔄 Requesting teacher strokes...');
-          channel.publish('request-teacher-strokes', {
-            clientId: clientId,
-            studentId: studentId,
-            timestamp: Date.now()
-          });
-
-          // Set timeout to hide loading if no response (10 seconds)
-          strokeRestorationTimeoutRef.current = setTimeout(() => {
-            console.log('⏱️ Teacher stroke request timed out');
-            setIsRestoringStrokes(false);
-          }, 10000);
-        }
-      } else {
-        console.log('ℹ️ No saved work found in IndexedDB memory for this question - starting fresh');
-
-        // If student drew while loading (but no saved data), save those strokes now
-        if (hasDrawnWhileLoading) {
-          console.log('💾 Saving', currentLines.length, 'strokes drawn while IndexedDB was loading');
-          await saveStudentWork(
-            studentId,
-            sessionId,
-            currentQuestionId,
-            currentLines,
+            studentStrokes,
             {
               base: BASE_CANVAS,
               display: canvasSize,
               scale: canvasScale,
             },
-            [] // No teacher annotations yet
+            teacherStrokes
           );
-          console.log('✅ New strokes saved to IndexedDB');
+          console.log('💾 Backed up to IndexedDB');
         }
 
-        // Request teacher strokes even if we don't have our own work
-        console.log('🔄 Requesting teacher strokes...');
-        channel.publish('request-teacher-strokes', {
-          clientId: clientId,
-          studentId: studentId,
-          timestamp: Date.now()
-        });
+        // Publish stroke count
+        setTimeout(() => {
+          channel.publish('student-stroke-count', {
+            studentId: studentId,
+            strokeCount: studentStrokes.length,
+            timestamp: Date.now(),
+          });
+          lastPublishedLineCountRef.current = studentStrokes.length;
+          isRemoteUpdate.current = false;
+        }, 100);
 
-        // Set timeout to hide loading if no response (10 seconds)
-        strokeRestorationTimeoutRef.current = setTimeout(() => {
-          console.log('⏱️ Teacher stroke request timed out');
-          setIsRestoringStrokes(false);
-        }, 10000);
+      } catch (error) {
+        console.error('❌ Failed to load from Redis, trying IndexedDB fallback:', error);
+
+        // Fallback to IndexedDB if Redis fails
+        try {
+          const saved = await loadStudentWork(studentId, sessionId, currentQuestionId);
+          if (saved?.lines) {
+            isRemoteUpdate.current = true;
+            setStudentLines(saved.lines);
+            setTeacherLines(saved.teacherAnnotations || []);
+            setTimeout(() => {
+              isRemoteUpdate.current = false;
+            }, 100);
+            console.log('📂 Loaded from IndexedDB fallback:', saved.lines.length, 'lines');
+          }
+        } catch (fallbackError) {
+          console.error('❌ IndexedDB fallback also failed:', fallbackError);
+        }
       }
+
+      // Hide loading state
+      setIsRestoringStrokes(false);
     };
 
     loadSavedWork();
   }, [studentId, sessionId, currentQuestionId, channel, clientId, studentName, canvasSize, canvasScale]);
 
-  // Sync student lines to Ably and IndexedDB (per-stroke)
+  // Sync student lines to Ably, IndexedDB, and Redis (per-stroke)
   useEffect(() => {
     if (!clientId || !channel || isRemoteUpdate.current) {
       return;
     }
 
     const timer = setTimeout(async () => {
-      // Always save full state to IndexedDB
       if (studentId && sessionId && currentQuestionId) {
         const lineCount = studentLines.length;
-        console.log('💾 Appending/Saving stroke to IndexedDB:', lineCount, 'total lines for question', currentQuestionId);
+
+        // Save to IndexedDB (local backup)
         await saveStudentWork(
           studentId,
           sessionId,
@@ -1076,19 +965,36 @@ function Student() {
             display: canvasSize,
             scale: canvasScale,
           },
-          teacherLinesRef.current // Include current teacher annotations
+          teacherLinesRef.current
         );
-        console.log('✅ Successfully saved to IndexedDB');
+        console.log('💾 Saved to IndexedDB:', lineCount, 'lines');
+
+        // Save to Redis (for persistence across refreshes)
+        try {
+          await fetch('/api/strokes/save', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              sessionId,
+              questionId: currentQuestionId,
+              userId: studentId,
+              role: 'student',
+              strokes: studentLines
+            })
+          });
+          console.log('☁️ Saved to Redis:', lineCount, 'lines');
+        } catch (error) {
+          console.error('❌ Failed to save to Redis:', error);
+        }
       }
 
-      // Publish lightweight stroke count (not full stroke data - teacher doesn't need it)
+      // Publish lightweight stroke count (for real-time updates)
       channel.publish('student-stroke-count', {
         studentId: studentId,
         strokeCount: studentLines.length,
         timestamp: Date.now(),
       });
 
-      // Update last published count
       lastPublishedLineCountRef.current = studentLines.length;
     }, 150);
 
@@ -1374,6 +1280,26 @@ function Student() {
     redoStack.current = [];
     setStudentLines([]);
 
+    // Clear from Redis
+    if (sessionId && currentQuestionId && studentId) {
+      try {
+        await fetch('/api/strokes/clear', {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sessionId,
+            questionId: currentQuestionId,
+            userId: studentId,
+            role: 'student'
+          })
+        });
+        console.log('🗑️ Cleared student strokes from Redis');
+      } catch (error) {
+        console.error('❌ Failed to clear from Redis:', error);
+      }
+    }
+
+    // Publish stroke count update
     if (channel) {
       await channel.publish('student-stroke-count', {
         studentId: studentId,

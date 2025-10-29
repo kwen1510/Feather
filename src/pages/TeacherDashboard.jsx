@@ -454,10 +454,29 @@ const TeacherDashboard = () => {
             setCurrentQuestionId(savedState.currentQuestionId);
             currentQuestionIdRef.current = savedState.currentQuestionId;
 
-            // Load teacher annotations for current question
-            const annotations = await loadTeacherAnnotations(sessionId, savedState.currentQuestionId);
-            if (Object.keys(annotations).length > 0) {
-              setTeacherAnnotations(annotations);
+            // Load teacher annotations for current question from Redis
+            const loadedAnnotations = {};
+            if (savedState.students) {
+              for (const studentId of Object.keys(savedState.students)) {
+                try {
+                  const response = await fetch(
+                    `/api/strokes/load?sessionId=${sessionId}&questionId=${savedState.currentQuestionId}&userId=${studentId}`
+                  );
+                  if (response.ok) {
+                    const data = await response.json();
+                    if (data.teacherStrokes && data.teacherStrokes.length > 0) {
+                      loadedAnnotations[studentId] = data.teacherStrokes;
+                    }
+                  }
+                } catch (error) {
+                  console.error(`❌ Failed to load annotations for student ${studentId}:`, error);
+                }
+              }
+            }
+
+            if (Object.keys(loadedAnnotations).length > 0) {
+              setTeacherAnnotations(loadedAnnotations);
+              console.log('📂 Loaded', Object.keys(loadedAnnotations).length, 'teacher annotations from Redis');
             }
           } else {
             currentQuestionIdRef.current = null;
@@ -765,48 +784,6 @@ const TeacherDashboard = () => {
           }, 100);
         });
 
-        // Listen for students requesting teacher strokes (after refresh)
-        whiteboardChannel.subscribe('request-teacher-strokes', (message) => {
-          const { clientId: requestingClientId, studentId: requestingStudentId } = message.data || {};
-          console.log('📨 Received request-teacher-strokes from student:', requestingStudentId);
-
-          // Get teacher annotations for this student
-          const annotations = teacherAnnotationsRef.current?.[requestingStudentId] || [];
-
-          // Respond with teacher strokes
-          whiteboardChannel.publish('teacher-strokes-response', {
-            targetClientId: requestingClientId,
-            targetStudentId: requestingStudentId,
-            strokes: annotations,
-            timestamp: Date.now()
-          });
-
-          console.log('📤 Sent', annotations.length, 'teacher annotations to student');
-        });
-
-        // Listen for student stroke responses (after teacher refresh)
-        whiteboardChannel.subscribe('student-strokes-response', (message) => {
-          const { clientId: respondingClientId, studentId: respondingStudentId, strokes } = message.data || {};
-          console.log('📨 Received student-strokes-response from:', respondingStudentId, '-', strokes?.length || 0, 'strokes');
-
-          // Update student stroke count
-          if (respondingStudentId && strokes) {
-            setStudents(prev => {
-              const student = prev[respondingStudentId];
-              if (!student) return prev;
-
-              return {
-                ...prev,
-                [respondingStudentId]: {
-                  ...student,
-                  strokeCount: strokes.length,
-                  lastUpdate: Date.now()
-                }
-              };
-            });
-          }
-        });
-
         // Enter presence with teacher role
         await whiteboardChannel.presence.enter({
           role: 'teacher',
@@ -1001,7 +978,27 @@ const TeacherDashboard = () => {
       }
     }
 
-    // Publish annotations to Ably using current clientId for delivery
+    // Save to Redis for persistence across refreshes
+    if (sessionId && currentQuestionId) {
+      try {
+        await fetch('/api/strokes/save', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sessionId,
+            questionId: currentQuestionId,
+            userId: persistentStudentId,
+            role: 'teacher',
+            strokes: annotations
+          })
+        });
+        console.log('☁️ Saved teacher annotations to Redis:', annotations.length, 'strokes');
+      } catch (error) {
+        console.error('❌ Failed to save annotations to Redis:', error);
+      }
+    }
+
+    // Publish annotations to Ably using current clientId for delivery (for real-time updates)
     channel.publish('teacher-annotation', {
       targetStudentId: currentClientId, // Use clientId for Ably delivery
       annotations: annotations,
