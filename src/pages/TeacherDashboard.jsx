@@ -565,6 +565,25 @@ const TeacherDashboard = () => {
           });
         });
 
+        // Listen for student drawing updates
+        whiteboardChannel.subscribe('student-layer', (message) => {
+          const { lines, clientId: studentClientId } = message.data;
+
+          // Find the student by clientId
+          setStudents(prev => {
+            const studentId = Object.keys(prev).find(id => prev[id].clientId === studentClientId);
+            if (!studentId) return prev;
+
+            return {
+              ...prev,
+              [studentId]: {
+                ...prev[studentId],
+                lines: lines || [],
+              }
+            };
+          });
+        });
+
         // Listen for teacher shared images
         whiteboardChannel.subscribe('teacher-image', (message) => {
           setSharedImage(message.data);
