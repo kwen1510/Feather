@@ -5,7 +5,7 @@ import * as Ably from 'ably';
 import { supabase } from '../supabaseClient';
 import { Pen, Eraser, Undo, Redo, Trash2 } from 'lucide-react';
 import { getOrCreateStudentId } from '../utils/identity';
-import { initDB, saveStroke as saveStrokeToIndexedDB, loadStrokes as loadStrokesFromIndexedDB, clearStrokes as clearStrokesFromIndexedDB } from '../utils/indexedDB';
+import { initDB, saveStroke as saveStrokeToIndexedDB, loadStrokes as loadStrokesFromIndexedDB, clearStrokes as clearStrokesFromIndexedDB, validateSession } from '../utils/indexedDB';
 import './StudentNew.css';
 
 // Generate unique stroke ID
@@ -641,23 +641,32 @@ function Student() {
             if (!isActive) return;
 
             try {
-              // 2) When i reload the page, initialise index db
+              // 2) When i reload the page, initialise index db and validate session
               console.log('2️⃣ Page refresh detected - Re-initializing IndexedDB...');
               await initDB();
               console.log('✅ IndexedDB re-initialized on reload');
 
-              // 3) indexDB strokes loaded
-              console.log('3️⃣ Loading strokes from IndexedDB...');
-              const ownStrokes = await loadStrokesFromIndexedDB(roomId, studentId, 'student');
-              if (ownStrokes && ownStrokes.length > 0) {
-                console.log(`✅ IndexedDB strokes loaded: ${ownStrokes.length} strokes`);
-                isRemoteUpdate.current = true;
-                setStudentLines(ownStrokes);
-                setTimeout(() => {
-                  isRemoteUpdate.current = false;
-                }, 100);
+              // Validate session - clear if changed
+              console.log('🔍 Validating session ID...');
+              const isValidSession = await validateSession(roomId, studentId, 'student', sessionId);
+
+              if (!isValidSession) {
+                console.log('⚠️ Session changed - IndexedDB was cleared, starting fresh');
+                // Don't load strokes, they were cleared
               } else {
-                console.log('ℹ️ No strokes found in IndexedDB');
+                // 3) indexDB strokes loaded
+                console.log('3️⃣ Loading strokes from IndexedDB...');
+                const ownStrokes = await loadStrokesFromIndexedDB(roomId, studentId, 'student');
+                if (ownStrokes && ownStrokes.length > 0) {
+                  console.log(`✅ IndexedDB strokes loaded: ${ownStrokes.length} strokes`);
+                  isRemoteUpdate.current = true;
+                  setStudentLines(ownStrokes);
+                  setTimeout(() => {
+                    isRemoteUpdate.current = false;
+                  }, 100);
+                } else {
+                  console.log('ℹ️ No strokes found in IndexedDB');
+                }
               }
 
               // Load teacher annotations from Redis (specific to this student)
@@ -956,7 +965,7 @@ function Student() {
         try {
           // 1) When i draw a stroke, store in indexdb
           console.log('1️⃣ Drawing finished - Storing stroke in IndexedDB...');
-          await saveStrokeToIndexedDB(strokeToSave, roomId, studentId, 'student');
+          await saveStrokeToIndexedDB(strokeToSave, roomId, studentId, 'student', sessionId);
           console.log('✅ Stroke saved to IndexedDB:', strokeToSave.strokeId);
         } catch (error) {
           console.error('❌ Error saving stroke to IndexedDB:', error);

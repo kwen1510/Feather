@@ -63,29 +63,31 @@ export const initDB = () => {
  * @param {string} roomId - The room ID
  * @param {string} userId - The user ID (studentId for students, teacherId for teacher)
  * @param {string} userType - 'teacher' or 'student'
+ * @param {string} sessionId - The session ID (to validate on reload)
  * @returns {Promise<void>}
  */
-export const saveStroke = async (stroke, roomId, userId, userType) => {
+export const saveStroke = async (stroke, roomId, userId, userType, sessionId = null) => {
   try {
     const db = await initDB();
     const storeName = userType === 'teacher' ? TEACHER_STORE : STUDENT_STORE;
-    
+
     const transaction = db.transaction([storeName], 'readwrite');
     const store = transaction.objectStore(storeName);
-    
+
     // Create a unique ID for this stroke
     const id = `${roomId}:${userId}:${stroke.strokeId || Date.now()}`;
-    
+
     const strokeData = {
       id,
       roomId,
       userId,
+      sessionId, // Store session ID with stroke
       stroke,
       timestamp: Date.now()
     };
-    
+
     const request = store.put(strokeData);
-    
+
     return new Promise((resolve, reject) => {
       request.onsuccess = () => resolve();
       request.onerror = () => {
@@ -182,6 +184,68 @@ export const clearStrokes = async (roomId, userId, userType) => {
   } catch (error) {
     console.error('clearStrokes error:', error);
     throw error;
+  }
+};
+
+/**
+ * Validate session and clear IndexedDB if session has changed
+ * @param {string} roomId - The room ID
+ * @param {string} userId - The user ID
+ * @param {string} userType - 'teacher' or 'student'
+ * @param {string} currentSessionId - The current session ID
+ * @returns {Promise<boolean>} True if session is valid, false if cleared
+ */
+export const validateSession = async (roomId, userId, userType, currentSessionId) => {
+  try {
+    const db = await initDB();
+    const storeName = userType === 'teacher' ? TEACHER_STORE : STUDENT_STORE;
+
+    const transaction = db.transaction([storeName], 'readonly');
+    const store = transaction.objectStore(storeName);
+    const index = store.index('roomId');
+
+    const request = index.getAll(roomId);
+
+    return new Promise((resolve, reject) => {
+      request.onsuccess = async () => {
+        const allStrokes = request.result || [];
+        // Filter by userId to get this user's strokes
+        const userStrokes = allStrokes.filter(item => item.userId === userId);
+
+        if (userStrokes.length === 0) {
+          console.log('ℹ️ No existing strokes in IndexedDB');
+          resolve(true); // No data, session is valid
+          return;
+        }
+
+        // Check if any stroke has a different sessionId
+        const storedSessionId = userStrokes[0].sessionId;
+
+        if (!storedSessionId || !currentSessionId) {
+          console.log('ℹ️ No session ID to compare, keeping existing data');
+          resolve(true);
+          return;
+        }
+
+        if (storedSessionId !== currentSessionId) {
+          console.log(`🔄 Session changed (${storedSessionId} → ${currentSessionId}), clearing IndexedDB...`);
+          await clearStrokes(roomId, userId, userType);
+          console.log('✅ IndexedDB cleared for new session');
+          resolve(false); // Session changed, data was cleared
+        } else {
+          console.log(`✅ Same session (${currentSessionId}), keeping IndexedDB data`);
+          resolve(true); // Session is valid
+        }
+      };
+
+      request.onerror = () => {
+        console.error('Error validating session:', request.error);
+        reject(request.error);
+      };
+    });
+  } catch (error) {
+    console.error('validateSession error:', error);
+    return true; // On error, don't clear data
   }
 };
 
