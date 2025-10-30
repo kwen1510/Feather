@@ -214,11 +214,29 @@ function Student() {
   const redoStack = useRef([]);
   const isFirstRender = useRef(true);
 
-  // Ref to always access latest studentLines in auto-save
+  // Ref to always access latest studentLines
   const studentLinesRef = useRef(studentLines);
   useEffect(() => {
     studentLinesRef.current = studentLines;
   }, [studentLines]);
+
+  // Sync student lines to Ably (publish to teacher)
+  useEffect(() => {
+    if (!isRemoteUpdate.current && channel) {
+      const timer = setTimeout(() => {
+        channel.publish('student-layer', {
+          lines: studentLines,
+          clientId,
+          meta: {
+            display: canvasSize,
+            scale: canvasScale,
+          },
+        });
+        console.log('📤 Published student layer:', studentLines.length, 'lines');
+      }, 150);
+      return () => clearTimeout(timer);
+    }
+  }, [studentLines, channel, clientId, canvasSize, canvasScale]);
 
   // Ref to always access latest teacherLines for saving
   const teacherLinesRef = useRef(teacherLines);
