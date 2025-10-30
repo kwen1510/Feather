@@ -1,14 +1,14 @@
 /**
  * Identity Management for Feather Whiteboard
  *
- * Provides persistent student identification across browser refreshes,
+ * Provides persistent student identification across browser tab refreshes,
  * separate from the ephemeral Ably clientId.
  *
- * StudentId is stored in localStorage and persists across sessions,
- * allowing us to:
- * - Recover student work after refresh
- * - Associate multiple clientIds with the same student
- * - Track student progress across disconnections
+ * StudentId is stored in sessionStorage (per-tab) to ensure:
+ * - Each browser tab gets a unique student identity
+ * - Multiple students can join from the same browser
+ * - Student identity persists on tab refresh
+ * - Different tabs don't collide with the same ID
  */
 
 const STUDENT_ID_KEY = 'Feather_studentId';
@@ -26,38 +26,40 @@ const generateUUID = () => {
 };
 
 /**
- * Get or create persistent student ID
+ * Get or create persistent student ID (per browser tab)
  *
- * Returns existing ID from localStorage if available,
+ * Returns existing ID from sessionStorage if available,
  * otherwise generates new UUID and stores it.
  *
- * @returns {string} Persistent student identifier
+ * Uses sessionStorage (not localStorage) to ensure each tab gets unique ID.
+ *
+ * @returns {string} Persistent student identifier for this tab
  */
 export const getOrCreateStudentId = () => {
   try {
-    // Check for existing ID
-    let studentId = localStorage.getItem(STUDENT_ID_KEY);
+    // Check for existing ID in this tab's session
+    let studentId = sessionStorage.getItem(STUDENT_ID_KEY);
 
     if (studentId) {
       console.log('📱 Using existing studentId:', studentId);
       return studentId;
     }
 
-    // Generate new ID
+    // Generate new ID for this tab
     studentId = `student-${generateUUID()}`;
-    localStorage.setItem(STUDENT_ID_KEY, studentId);
+    sessionStorage.setItem(STUDENT_ID_KEY, studentId);
 
     console.log('🆕 Created new studentId:', studentId);
     return studentId;
   } catch (error) {
-    // If localStorage is unavailable, generate session-only ID
-    console.warn('⚠️ localStorage unavailable, using session-only studentId');
+    // If sessionStorage is unavailable, generate memory-only ID
+    console.warn('⚠️ sessionStorage unavailable, using memory-only studentId');
     return `student-temp-${generateUUID()}`;
   }
 };
 
 /**
- * Get current student ID (if exists)
+ * Get current student ID (if exists) for this tab
  *
  * Returns null if no ID has been created yet.
  *
@@ -65,22 +67,22 @@ export const getOrCreateStudentId = () => {
  */
 export const getStudentId = () => {
   try {
-    return localStorage.getItem(STUDENT_ID_KEY);
+    return sessionStorage.getItem(STUDENT_ID_KEY);
   } catch (error) {
-    console.warn('⚠️ Failed to get studentId from localStorage');
+    console.warn('⚠️ Failed to get studentId from sessionStorage');
     return null;
   }
 };
 
 /**
- * Clear student ID (for testing/debugging)
+ * Clear student ID for this tab (for testing/debugging)
  *
- * Use with caution - this will orphan any saved work.
+ * Only affects the current browser tab.
  */
 export const clearStudentId = () => {
   try {
-    localStorage.removeItem(STUDENT_ID_KEY);
-    console.log('🗑️ Cleared studentId');
+    sessionStorage.removeItem(STUDENT_ID_KEY);
+    console.log('🗑️ Cleared studentId for this tab');
     return true;
   } catch (error) {
     console.error('❌ Failed to clear studentId:', error);
