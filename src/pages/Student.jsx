@@ -214,11 +214,21 @@ function Student() {
   const redoStack = useRef([]);
   const isFirstRender = useRef(true);
 
+  // Refs for remote updates and state management
+  const isRemoteUpdate = useRef(false);
+  const eraserStateSaved = useRef(false);
+
   // Ref to always access latest studentLines
   const studentLinesRef = useRef(studentLines);
   useEffect(() => {
     studentLinesRef.current = studentLines;
   }, [studentLines]);
+
+  // Ref to always access latest teacherLines
+  const teacherLinesRef = useRef(teacherLines);
+  useEffect(() => {
+    teacherLinesRef.current = teacherLines;
+  }, [teacherLines]);
 
   // Sync student lines to Ably (publish to teacher)
   useEffect(() => {
@@ -237,15 +247,6 @@ function Student() {
       return () => clearTimeout(timer);
     }
   }, [studentLines, channel, clientId, canvasSize, canvasScale]);
-
-  // Ref to always access latest teacherLines for saving
-  const teacherLinesRef = useRef(teacherLines);
-  useEffect(() => {
-    teacherLinesRef.current = teacherLines;
-  }, [teacherLines]);
-
-  const isRemoteUpdate = useRef(false);
-  const eraserStateSaved = useRef(false);
 
   // Performance optimization: keep current line in ref to avoid re-renders
   const currentLineRef = useRef(null);
