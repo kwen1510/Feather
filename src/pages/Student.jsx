@@ -633,8 +633,21 @@ function Student() {
         }, 500);
 
         // Load strokes ONLY on page refresh (IndexedDB for own, Redis for teacher annotations)
-        const isPageRefresh = performance.navigation.type === 1 ||
-                             performance.getEntriesByType('navigation')[0]?.type === 'reload';
+        // Use sessionStorage flag to reliably detect refresh
+        const hasLoadedBefore = sessionStorage.getItem('feather_page_loaded');
+        const navEntry = performance.getEntriesByType('navigation')[0];
+        const isPageRefresh = hasLoadedBefore === 'true' ||
+                             navEntry?.type === 'reload' ||
+                             performance.navigation?.type === 1;
+
+        // Mark that page has been loaded
+        sessionStorage.setItem('feather_page_loaded', 'true');
+
+        console.log('🔍 Page load detection:', {
+          hasLoadedBefore,
+          navType: navEntry?.type,
+          isPageRefresh,
+        });
 
         if (isPageRefresh) {
           setTimeout(async () => {
