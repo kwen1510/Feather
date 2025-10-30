@@ -264,12 +264,21 @@ function Student() {
     }
   }, [studentLines, channel, clientId, studentId, canvasSize, canvasScale]);
 
-  // Auto-save student strokes to Redis (debounced for performance)
+  // Track last saved state to avoid unnecessary Redis writes
+  const lastSavedLinesRef = useRef('');
+
+  // Auto-save student strokes to Redis (debounced for performance, only if changed)
   useEffect(() => {
     if (!roomId || !studentId || !studentName) return;
 
     const timer = setTimeout(async () => {
       try {
+        // Only save if lines actually changed
+        const currentHash = JSON.stringify(studentLines);
+        if (currentHash === lastSavedLinesRef.current) {
+          return; // No changes, skip save
+        }
+
         await fetch('/api/strokes/save', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -280,10 +289,13 @@ function Student() {
             studentName,
           }),
         });
+
+        lastSavedLinesRef.current = currentHash;
+        console.log(`💾 Saved ${studentLines.length} lines to Redis`);
       } catch (error) {
         console.error('Error auto-saving strokes to Redis:', error);
       }
-    }, 2000); // 2 second debounce
+    }, 3000); // 3 second debounce (increased to reduce write frequency)
 
     return () => clearTimeout(timer);
   }, [studentLines, roomId, studentId, studentName]);

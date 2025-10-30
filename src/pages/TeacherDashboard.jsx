@@ -194,36 +194,69 @@ const TeacherDashboard = () => {
     }
   }, [sessionId, sessionStatus, channel, currentQuestionNumber, roomId, sharedImage]);
 
-  // Auto-save strokes to Redis (debounced for performance)
+  // Track last saved state to avoid unnecessary Redis writes
+  const lastSavedRef = useRef({});
+  const saveTimerRef = useRef(null);
+
+  // Auto-save strokes to Redis (debounced for performance, only saves changed data)
   useEffect(() => {
     if (!roomId || !sessionId || currentQuestionNumber === 0) return;
 
-    const timer = setTimeout(async () => {
-      try {
-        // Save each student's strokes and annotations to Redis
-        const savePromises = Object.entries(students).map(async ([studentId, student]) => {
-          if (!student.lines && !teacherAnnotations[studentId]) return;
+    // Clear existing timer
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+    }
 
-          return fetch('/api/strokes/save', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              roomId,
-              studentId,
-              lines: student.lines || [],
-              annotations: teacherAnnotations[studentId] || [],
-              studentName: student.name,
-            }),
-          });
+    saveTimerRef.current = setTimeout(async () => {
+      try {
+        const savePromises = [];
+
+        // Only save students whose data has changed
+        Object.entries(students).forEach(([studentId, student]) => {
+          const lines = student.lines || [];
+          const annotations = teacherAnnotations[studentId] || [];
+          
+          // Skip if no data
+          if (lines.length === 0 && annotations.length === 0) return;
+
+          // Create a hash of the current data to compare
+          const currentHash = JSON.stringify({ lines, annotations });
+          const lastHash = lastSavedRef.current[studentId];
+
+          // Only save if data changed
+          if (currentHash !== lastHash) {
+            lastSavedRef.current[studentId] = currentHash;
+            
+            savePromises.push(
+              fetch('/api/strokes/save', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  roomId,
+                  studentId,
+                  lines,
+                  annotations,
+                  studentName: student.name,
+                }),
+              })
+            );
+          }
         });
 
-        await Promise.all(savePromises);
+        if (savePromises.length > 0) {
+          await Promise.all(savePromises);
+          console.log(`💾 Saved ${savePromises.length} changed student(s) to Redis`);
+        }
       } catch (error) {
         console.error('Error auto-saving to Redis:', error);
       }
-    }, 2000); // 2 second debounce
+    }, 3000); // 3 second debounce (increased from 2s to reduce write frequency)
 
-    return () => clearTimeout(timer);
+    return () => {
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current);
+      }
+    };
   }, [students, teacherAnnotations, roomId, sessionId, currentQuestionNumber]);
 
   // Save settings to localStorage
