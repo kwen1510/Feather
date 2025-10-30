@@ -7,7 +7,7 @@ import StudentCard from '../components/StudentCard';
 import AnnotationModal from '../components/AnnotationModal';
 import { resizeAndCompressImage } from '../utils/imageUtils';
 import { supabase } from '../supabaseClient';
-import { saveStroke as saveStrokeToIndexedDB, loadStrokes as loadStrokesFromIndexedDB, clearStrokes as clearStrokesFromIndexedDB } from '../utils/indexedDB';
+import { initDB, saveStroke as saveStrokeToIndexedDB, loadStrokes as loadStrokesFromIndexedDB, clearStrokes as clearStrokesFromIndexedDB, validateSession, replaceAllStrokes as replaceAllStrokesInIndexedDB, loadAllTeacherAnnotations } from '../utils/indexedDB';
 import './TeacherDashboard.css';
 
 // Generate unique stroke ID
@@ -242,35 +242,36 @@ const TeacherDashboard = () => {
           }
         }
 
-        // Save new teacher annotation strokes (grouped by studentId for proper restoration)
-        const lastSavedTeacherIds = lastSavedStrokesRef.current.teacher || new Set();
-        const newAnnotationsByStudent = {};
-
-        Object.entries(teacherAnnotations).forEach(([studentId, annotations]) => {
-          const newStrokes = annotations.filter(
-            ann => ann.strokeId && !lastSavedTeacherIds.has(ann.strokeId)
-          );
-          if (newStrokes.length > 0) {
-            newAnnotationsByStudent[studentId] = newStrokes;
-          }
-        });
-
-        if (Object.keys(newAnnotationsByStudent).length > 0) {
+        // Save ALL teacher annotation strokes (complete replacement to handle erases/undos)
+        // This ensures Redis stays in sync with IndexedDB when strokes are removed
+        if (Object.keys(teacherAnnotations).length > 0) {
+          const totalStrokes = Object.values(teacherAnnotations).flat().length;
+          
           await fetch('/api/strokes/save', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               roomId,
               party: 'teacher',
-              annotations: newAnnotationsByStudent, // Send grouped structure
+              annotations: teacherAnnotations, // Send complete current state (grouped by studentId)
             }),
           });
 
-          // Mark strokes as saved
-          Object.values(newAnnotationsByStudent).flat().forEach(stroke => lastSavedTeacherIds.add(stroke.strokeId));
-          lastSavedStrokesRef.current.teacher = lastSavedTeacherIds;
-          const totalStrokes = Object.values(newAnnotationsByStudent).flat().length;
-          console.log(`💾 Saved ${totalStrokes} new teacher annotation strokes for ${Object.keys(newAnnotationsByStudent).length} students`);
+          console.log(`💾 Saved complete teacher annotation state to Redis: ${totalStrokes} strokes for ${Object.keys(teacherAnnotations).length} students`);
+        } else if (lastSavedStrokesRef.current.teacher && lastSavedStrokesRef.current.teacher.size > 0) {
+          // If there are no annotations but we previously had some, clear Redis
+          await fetch('/api/strokes/save', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              roomId,
+              party: 'teacher',
+              annotations: {}, // Empty object to clear Redis
+            }),
+          });
+          
+          lastSavedStrokesRef.current.teacher = new Set();
+          console.log('🗑️ Cleared all teacher annotations from Redis');
         }
       } catch (error) {
         console.error('Error auto-saving to Redis:', error);
@@ -644,17 +645,26 @@ const TeacherDashboard = () => {
 
           // Send current shared image if exists
           setTimeout(() => {
-            const annotations = teacherAnnotationsRef.current?.[incomingStudentId] || [];
+            try {
+              if (!whiteboardChannel || whiteboardChannel.state !== 'attached') {
+                console.warn('⚠️ Cannot send sync-full-state: channel not ready');
+                return;
+              }
 
-            whiteboardChannel.publish('sync-full-state', {
-              targetClientId: incomingClientId,
-              content: sharedImageRef.current || null,
-              annotations: annotations,
-              timestamp: Date.now(),
-            });
+              const annotations = teacherAnnotationsRef.current?.[incomingStudentId] || [];
 
-            if (annotations.length > 0) {
-              console.log('📤 Sent', annotations.length, 'teacher annotations to', studentName);
+              whiteboardChannel.publish('sync-full-state', {
+                targetClientId: incomingClientId,
+                content: sharedImageRef.current || null,
+                annotations: annotations,
+                timestamp: Date.now(),
+              });
+
+              if (annotations.length > 0) {
+                console.log('📤 Sent', annotations.length, 'teacher annotations to', studentName);
+              }
+            } catch (error) {
+              console.error('❌ Error sending sync-full-state:', error);
             }
           }, 300);
         });
@@ -755,14 +765,23 @@ const TeacherDashboard = () => {
 
           // Send current shared image + annotations to the requesting student
           setTimeout(() => {
-            const annotations = teacherAnnotationsRef.current?.[requestingStudentId] || [];
+            try {
+              if (!whiteboardChannel || whiteboardChannel.state !== 'attached') {
+                console.warn('⚠️ Cannot send sync-full-state: channel not ready');
+                return;
+              }
 
-            whiteboardChannel.publish('sync-full-state', {
-              targetClientId: message.clientId,
-              content: sharedImageRef.current || null,
-              annotations: annotations,
-              timestamp: Date.now(),
-            });
+              const annotations = teacherAnnotationsRef.current?.[requestingStudentId] || [];
+
+              whiteboardChannel.publish('sync-full-state', {
+                targetClientId: message.clientId,
+                content: sharedImageRef.current || null,
+                annotations: annotations,
+                timestamp: Date.now(),
+              });
+            } catch (error) {
+              console.error('❌ Error sending sync-full-state on request:', error);
+            }
           }, 100);
         });
 
@@ -830,25 +849,80 @@ const TeacherDashboard = () => {
         setChannel(whiteboardChannel);
 
         // Load strokes ONLY on page refresh (IndexedDB for teacher, Redis for students)
-        const isPageRefresh = performance.navigation.type === 1 || 
-                             performance.getEntriesByType('navigation')[0]?.type === 'reload';
+        // Use sessionStorage flag to reliably detect refresh
+        const hasLoadedBefore = sessionStorage.getItem('feather_teacher_page_loaded');
+        const navEntry = performance.getEntriesByType('navigation')[0];
+        const isPageRefresh = hasLoadedBefore === 'true' ||
+                             navEntry?.type === 'reload' ||
+                             performance.navigation?.type === 1;
+
+        // Mark that page has been loaded
+        sessionStorage.setItem('feather_teacher_page_loaded', 'true');
+
+        console.log('🔍 Teacher page load detection:', {
+          hasLoadedBefore,
+          navType: navEntry?.type,
+          isPageRefresh,
+        });
         
         if (isPageRefresh) {
           setTimeout(async () => {
             try {
               console.log('🔄 Page refresh detected - loading from IndexedDB + Redis...');
               
-              // Load teacher annotations from Redis (grouped by studentId)
+              // Initialize IndexedDB
+              await initDB();
+              console.log('✅ IndexedDB initialized for teacher');
+              
+              // Validate session - clear IndexedDB if session changed
+              const isValidSession = await validateSession(roomId, clientId, 'teacher', sessionId);
+              
+              if (!isValidSession) {
+                console.log('⚠️ Session changed - IndexedDB was cleared for teacher');
+              }
+              
+              // Load teacher annotations from both IndexedDB and Redis
+              let teacherAnnotationsFromIndexedDB = {};
+              let teacherAnnotationsFromRedis = {};
+              
+              // 1) Load ALL teacher annotations from IndexedDB first (primary source)
+              if (isValidSession) {
+                console.log('📂 Loading all teacher annotations from IndexedDB...');
+                teacherAnnotationsFromIndexedDB = await loadAllTeacherAnnotations(roomId);
+                
+                if (Object.keys(teacherAnnotationsFromIndexedDB).length > 0) {
+                  console.log(`✅ Loaded teacher annotations from IndexedDB for ${Object.keys(teacherAnnotationsFromIndexedDB).length} students`);
+                } else {
+                  console.log('ℹ️ No teacher annotations found in IndexedDB');
+                }
+              }
+              
+              // 2) Load teacher annotations from Redis (backup/fallback)
               const teacherResponse = await fetch(`/api/strokes/load?roomId=${roomId}&party=teacher`);
               if (teacherResponse.ok) {
                 const teacherData = await teacherResponse.json();
                 if (teacherData.annotations && Object.keys(teacherData.annotations).length > 0) {
-                  console.log(`✅ Loaded teacher annotations for ${Object.keys(teacherData.annotations).length} students from Redis`);
-                  // Restore the grouped structure
-                  setTeacherAnnotations(teacherData.annotations);
+                  console.log(`✅ Loaded teacher annotations from Redis for ${Object.keys(teacherData.annotations).length} students`);
+                  teacherAnnotationsFromRedis = teacherData.annotations;
                 } else {
                   console.log('ℹ️ No teacher annotations found in Redis');
                 }
+              }
+              
+              // 3) Merge: Start with Redis (older), then overwrite with IndexedDB (newer/most recent)
+              const mergedAnnotations = {
+                ...teacherAnnotationsFromRedis,
+                ...teacherAnnotationsFromIndexedDB
+              };
+              
+              // 4) Restore to UI
+              if (Object.keys(mergedAnnotations).length > 0) {
+                setTeacherAnnotations(mergedAnnotations);
+                console.log(`✅ Restored teacher annotations for ${Object.keys(mergedAnnotations).length} students total`);
+                console.log(`   - ${Object.keys(teacherAnnotationsFromIndexedDB).length} from IndexedDB (primary)`);
+                console.log(`   - ${Object.keys(teacherAnnotationsFromRedis).length} from Redis (fallback)`);
+              } else {
+                console.log('ℹ️ No teacher annotations to restore');
               }
 
               // Load all students' strokes from Redis
@@ -921,6 +995,7 @@ const TeacherDashboard = () => {
 
   // Extract friendly name from clientId
   const extractStudentName = (clientId) => {
+    if (!clientId) return 'Student';
     const match = clientId.match(/student-(\d+)/) || clientId.match(/student-([\w]+)/);
     return match ? `Student ${match[1]}` : clientId;
   };
@@ -962,17 +1037,20 @@ const TeacherDashboard = () => {
       timestamp: Date.now(),
     });
 
-    // Save to IndexedDB immediately after Ably publish (150ms delay)
+    // Save all annotations to IndexedDB for this specific student
     setTimeout(async () => {
       try {
-        // Save each annotation stroke to IndexedDB
-        for (const annotation of annotations) {
-          if (annotation.strokeId) {
-            await saveStrokeToIndexedDB(annotation);
-          }
-        }
+        console.log(`💾 Saving ${annotations.length} teacher annotations for student ${persistentStudentId} to IndexedDB`);
+        
+        // Create a composite key for teacher annotations: `teacher:${persistentStudentId}`
+        // This allows us to store annotations per student in IndexedDB
+        const teacherUserId = `teacher:${persistentStudentId}`;
+        
+        // Use replaceAllStrokes to save all annotations for this student
+        await replaceAllStrokesInIndexedDB(annotations, roomId, teacherUserId, 'teacher', sessionId);
+        console.log(`✅ Saved teacher annotations for student ${persistentStudentId} to IndexedDB`);
       } catch (error) {
-        console.error('Error saving annotations to IndexedDB:', error);
+        console.error('❌ Error saving teacher annotations to IndexedDB:', error);
       }
     }, 150);
   };
@@ -1351,14 +1429,21 @@ const TeacherDashboard = () => {
         });
         return updated;
       });
+      const currentAnnotations = teacherAnnotationsRef.current;
       setTeacherAnnotations({}); // Clear all teacher annotations
 
-      // Clear IndexedDB for teacher's own annotations
+      // Clear IndexedDB for teacher's annotations for each student
       try {
-        await clearStrokesFromIndexedDB();
-        console.log('🗑️ Cleared teacher annotations from IndexedDB');
+        const studentIds = Object.keys(currentAnnotations);
+        if (studentIds.length > 0) {
+          for (const studentId of studentIds) {
+            const teacherUserId = `teacher:${studentId}`;
+            await clearStrokesFromIndexedDB(roomId, teacherUserId, 'teacher');
+          }
+          console.log(`🗑️ Cleared teacher annotations for ${studentIds.length} students from IndexedDB`);
+        }
       } catch (error) {
-        console.error('Error clearing IndexedDB:', error);
+        console.error('❌ Error clearing teacher annotations from IndexedDB:', error);
       }
 
       // Update local shared image state

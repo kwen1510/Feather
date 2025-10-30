@@ -5,7 +5,7 @@ import * as Ably from 'ably';
 import { supabase } from '../supabaseClient';
 import { Pen, Eraser, Undo, Redo, Trash2 } from 'lucide-react';
 import { getOrCreateStudentId } from '../utils/identity';
-import { initDB, saveStroke as saveStrokeToIndexedDB, loadStrokes as loadStrokesFromIndexedDB, clearStrokes as clearStrokesFromIndexedDB, validateSession } from '../utils/indexedDB';
+import { initDB, saveStroke as saveStrokeToIndexedDB, loadStrokes as loadStrokesFromIndexedDB, clearStrokes as clearStrokesFromIndexedDB, validateSession, replaceAllStrokes as replaceAllStrokesInIndexedDB } from '../utils/indexedDB';
 import './StudentNew.css';
 
 // Generate unique stroke ID
@@ -480,22 +480,41 @@ function Student() {
             try {
               // Re-enter presence
               await whiteboardChannel.presence.enter({
-                name: studentName,
-                studentId: studentId, // Include persistent studentId
+                name: studentName || 'Anonymous',
+                studentId: studentId || '',
                 isVisible: !document.hidden
               });
-              console.log('✅ Re-entered presence as:', studentName, 'with studentId:', studentId);
+              console.log('✅ Re-entered presence as:', studentName || 'Anonymous', 'with studentId:', studentId || '');
 
               // Request current question state + annotations (combined in sync-full-state)
               setTimeout(() => {
                 if (!isActive) return;
                 console.log('🔄 Requesting full state (question + annotations)');
                 whiteboardChannel.publish('request-current-state', {
-                  clientId: clientId,
-                  studentId: studentId, // Include persistent studentId for annotation lookup
+                  clientId: clientId || '',
+                  studentId: studentId || '',
                   timestamp: Date.now(),
                 });
               }, 300);
+              
+              // Re-publish current strokes to teacher after reconnection
+              setTimeout(() => {
+                if (!isActive) return;
+                const currentStrokes = studentLinesRef.current;
+                if (currentStrokes && currentStrokes.length > 0) {
+                  console.log('🔄 Re-emitting', currentStrokes.length, 'strokes to teacher after reconnection...');
+                  whiteboardChannel.publish('student-layer', {
+                    lines: currentStrokes,
+                    studentId: studentId || '',
+                    clientId: clientId || '',
+                    meta: {
+                      display: canvasSizeRef.current,
+                      scale: canvasScaleRef.current,
+                    },
+                  });
+                  console.log('📤 Re-published strokes to teacher after reconnection');
+                }
+              }, 400);
             } catch (error) {
               console.error('❌ Error during reconnection:', error);
             }
@@ -609,8 +628,8 @@ function Student() {
 
         // Enter presence with student name and initial visibility status
         await whiteboardChannel.presence.enter({
-          name: studentName,
-          studentId: studentId, // Include persistent studentId
+          name: studentName || 'Anonymous',
+          studentId: studentId || '',
           isVisible: !document.hidden
         });
 
@@ -626,8 +645,8 @@ function Student() {
         setTimeout(() => {
           if (!isActive) return;
           whiteboardChannel.publish('request-current-state', {
-            clientId: clientId,
-            studentId: studentId,
+            clientId: clientId || '',
+            studentId: studentId || '',
             timestamp: Date.now(),
           });
         }, 500);
@@ -677,6 +696,23 @@ function Student() {
                   setTimeout(() => {
                     isRemoteUpdate.current = false;
                   }, 100);
+                  
+                  // 4) Explicitly publish loaded strokes to teacher (rejoin after refresh)
+                  setTimeout(() => {
+                    if (whiteboardChannel && isActive) {
+                      console.log('4️⃣ Re-emitting strokes to teacher after refresh...');
+                      whiteboardChannel.publish('student-layer', {
+                        lines: ownStrokes,
+                        studentId,
+                        clientId,
+                        meta: {
+                          display: canvasSizeRef.current,
+                          scale: canvasScaleRef.current,
+                        },
+                      });
+                      console.log(`📤 Re-published ${ownStrokes.length} strokes to teacher after rejoin`);
+                    }
+                  }, 200); // After isRemoteUpdate is reset
                 } else {
                   console.log('ℹ️ No strokes found in IndexedDB');
                 }
@@ -753,15 +789,15 @@ function Student() {
       const isVisible = !document.hidden;
 
       channel.presence.update({
-        name: studentName,
-        studentId: studentId, // Include persistent studentId
+        name: studentName || 'Anonymous',
+        studentId: studentId || '',
         isVisible: isVisible,
         lastVisibilityChange: Date.now()
       });
 
       channel.publish('student-visibility', {
-        studentId: studentId, // Use persistent studentId (teacher state keyed by this)
-        studentName: studentName,
+        studentId: studentId || '', // Use persistent studentId (teacher state keyed by this)
+        studentName: studentName || 'Anonymous',
         isVisible: isVisible,
         timestamp: Date.now()
       });
@@ -969,10 +1005,14 @@ function Student() {
       }
       return;
     }
+    
+    const wasPen = tool === 'pen';
+    const wasEraser = tool === 'eraser' && eraserStateSaved.current;
+    
     setIsDrawing(false);
 
     // Save the stroke to IndexedDB immediately after drawing (150ms delay)
-    if (currentLineRef.current && currentLineRef.current.strokeId) {
+    if (wasPen && currentLineRef.current && currentLineRef.current.strokeId) {
       const strokeToSave = currentLineRef.current;
       setTimeout(async () => {
         try {
@@ -985,30 +1025,67 @@ function Student() {
         }
       }, 150);
     }
+    
+    // If eraser was used, sync the entire state to IndexedDB
+    if (wasEraser) {
+      setTimeout(async () => {
+        try {
+          console.log('🗑️ Eraser used - Syncing remaining strokes to IndexedDB...');
+          await replaceAllStrokesInIndexedDB(studentLinesRef.current, roomId, studentId, 'student', sessionId);
+          console.log('✅ Eraser: Synced to IndexedDB');
+        } catch (error) {
+          console.error('❌ Error syncing eraser changes to IndexedDB:', error);
+        }
+      }, 150);
+    }
 
     currentLineRef.current = null; // Clear the current line ref
   };
 
-  const handleUndo = () => {
+  const handleUndo = async () => {
     if (undoStack.current.length > 0) {
       const previousState = undoStack.current.pop();
       redoStack.current.push([...studentLines]);
       setStudentLines(previousState);
+      
+      // Sync with IndexedDB
+      try {
+        await replaceAllStrokesInIndexedDB(previousState, roomId, studentId, 'student', sessionId);
+        console.log('✅ Undo: Synced to IndexedDB');
+      } catch (error) {
+        console.error('❌ Error syncing undo to IndexedDB:', error);
+      }
     }
   };
 
-  const handleRedo = () => {
+  const handleRedo = async () => {
     if (redoStack.current.length > 0) {
       const nextState = redoStack.current.pop();
       undoStack.current.push([...studentLines]);
       setStudentLines(nextState);
+      
+      // Sync with IndexedDB
+      try {
+        await replaceAllStrokesInIndexedDB(nextState, roomId, studentId, 'student', sessionId);
+        console.log('✅ Redo: Synced to IndexedDB');
+      } catch (error) {
+        console.error('❌ Error syncing redo to IndexedDB:', error);
+      }
     }
   };
 
-  const handleClear = () => {
+  const handleClear = async () => {
     undoStack.current.push([...studentLines]);
     redoStack.current = [];
     setStudentLines([]);
+    
+    // Clear from IndexedDB
+    try {
+      await clearStrokesFromIndexedDB(roomId, studentId, 'student');
+      console.log('✅ Clear: Synced to IndexedDB');
+    } catch (error) {
+      console.error('❌ Error clearing IndexedDB:', error);
+    }
   };
 
   const getShortClientId = () => {

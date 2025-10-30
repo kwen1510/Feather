@@ -44,6 +44,9 @@ const AnnotationModal = ({
   // Performance optimization: keep current line in ref to avoid re-renders
   const currentLineRef = useRef(null);
   const animationFrameRef = useRef(null);
+  
+  // Ref to always access latest teacherAnnotations (prevents stale closure in callbacks)
+  const teacherAnnotationsRef = useRef(teacherAnnotations);
 
   // Load shared image
   useEffect(() => {
@@ -130,6 +133,11 @@ const AnnotationModal = ({
       setTeacherAnnotations(existingAnnotations);
     }
   }, [existingAnnotations, isOpen, student]);
+
+  // Sync ref with state to avoid stale closures
+  useEffect(() => {
+    teacherAnnotationsRef.current = teacherAnnotations;
+  }, [teacherAnnotations]);
 
   // Cleanup animation frame on unmount
   useEffect(() => {
@@ -274,6 +282,7 @@ const AnnotationModal = ({
 
   const getStudentName = () => {
     if (student.name) return student.name;
+    if (!student.clientId) return 'Student';
     const match = student.clientId.match(/student-(\d+)/) || student.clientId.match(/load-test-student-(\d+)/);
     return match ? `Student ${match[1]}` : student.clientId;
   };
@@ -427,10 +436,12 @@ const AnnotationModal = ({
       });
       // Clear current line ref
       currentLineRef.current = null;
-    } else {
-      // No current line ref (eraser mode or something else), just sync current state
-      setTimeout(() => onAnnotate(teacherAnnotations), 0);
+    } else if (eraserStateSaved.current) {
+      // Only sync if eraser was actually used (eraserStateSaved flag is set in handlePointerMove)
+      // Use ref to get latest state after eraser removes strokes (prevents stale closure bug)
+      setTimeout(() => onAnnotate(teacherAnnotationsRef.current), 0);
     }
+    // If neither condition is true, don't call onAnnotate (prevents unnecessary republishing)
   };
 
   const handleUndo = () => {

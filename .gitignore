@@ -11,3 +11,11 @@
 # Local testing
 test/
 node_modules
+
+# Build artifacts
+dist/
+node_modules/.vite/
+
+# Test results
+playwright-report/
+test-results/

@@ -144,6 +144,67 @@ export const loadStrokes = async (roomId, userId, userType) => {
 };
 
 /**
+ * Load all teacher annotations for a room, grouped by studentId
+ * @param {string} roomId - The room ID
+ * @returns {Promise<Object>} Object with studentId as keys and annotation arrays as values
+ */
+export const loadAllTeacherAnnotations = async (roomId) => {
+  try {
+    const db = await initDB();
+    const transaction = db.transaction([TEACHER_STORE], 'readonly');
+    const store = transaction.objectStore(TEACHER_STORE);
+    const index = store.index('roomId');
+    
+    const request = index.getAll(roomId);
+    
+    return new Promise((resolve, reject) => {
+      request.onsuccess = () => {
+        const allRecords = request.result || [];
+        
+        // Group by studentId (extract from userId like "teacher:student-abc123")
+        const grouped = {};
+        
+        allRecords.forEach(record => {
+          // userId format: "teacher:studentId"
+          if (record.userId && record.userId.startsWith('teacher:')) {
+            const studentId = record.userId.substring(8); // Remove "teacher:" prefix
+            
+            if (!grouped[studentId]) {
+              grouped[studentId] = [];
+            }
+            
+            grouped[studentId].push(record.stroke);
+          }
+        });
+        
+        // Sort strokes by timestamp for each student
+        Object.keys(grouped).forEach(studentId => {
+          grouped[studentId].sort((a, b) => {
+            const timeA = a.timestamp || 0;
+            const timeB = b.timestamp || 0;
+            return timeA - timeB;
+          });
+        });
+        
+        const studentCount = Object.keys(grouped).length;
+        const totalStrokes = Object.values(grouped).reduce((sum, arr) => sum + arr.length, 0);
+        
+        console.log(`📥 Loaded ${totalStrokes} teacher annotations for ${studentCount} students from IndexedDB`);
+        resolve(grouped);
+      };
+      
+      request.onerror = () => {
+        console.error('Error loading teacher annotations from IndexedDB:', request.error);
+        reject(request.error);
+      };
+    });
+  } catch (error) {
+    console.error('loadAllTeacherAnnotations error:', error);
+    return {}; // Return empty object on error
+  }
+};
+
+/**
  * Clear all strokes for a specific user (used on question change)
  * @param {string} roomId - The room ID
  * @param {string} userId - The user ID
@@ -246,6 +307,52 @@ export const validateSession = async (roomId, userId, userType, currentSessionId
   } catch (error) {
     console.error('validateSession error:', error);
     return true; // On error, don't clear data
+  }
+};
+
+/**
+ * Replace all strokes for a user with a new set (used for undo/redo/clear/erase)
+ * @param {Array} strokes - Array of stroke objects to save
+ * @param {string} roomId - The room ID
+ * @param {string} userId - The user ID
+ * @param {string} userType - 'teacher' or 'student'
+ * @param {string} sessionId - The session ID
+ * @returns {Promise<void>}
+ */
+export const replaceAllStrokes = async (strokes, roomId, userId, userType, sessionId = null) => {
+  try {
+    const db = await initDB();
+    const storeName = userType === 'teacher' ? TEACHER_STORE : STUDENT_STORE;
+
+    // First, clear existing strokes for this user
+    await clearStrokes(roomId, userId, userType);
+
+    // Then, save all new strokes
+    const transaction = db.transaction([storeName], 'readwrite');
+    const store = transaction.objectStore(storeName);
+
+    const promises = strokes.map((stroke, index) => {
+      const id = `${roomId}:${userId}:${stroke.strokeId || `${Date.now()}-${index}`}`;
+      const strokeData = {
+        id,
+        roomId,
+        userId,
+        sessionId,
+        stroke,
+        timestamp: Date.now() + index // Ensure ordering
+      };
+      return new Promise((resolve, reject) => {
+        const request = store.put(strokeData);
+        request.onsuccess = () => resolve();
+        request.onerror = () => reject(request.error);
+      });
+    });
+
+    await Promise.all(promises);
+    console.log(`💾 Replaced all IndexedDB strokes: ${strokes.length} strokes saved`);
+  } catch (error) {
+    console.error('replaceAllStrokes error:', error);
+    throw error;
   }
 };
 
