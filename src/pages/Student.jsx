@@ -5,7 +5,6 @@ import * as Ably from 'ably';
 import { supabase } from '../supabaseClient';
 import { Pen, Eraser, Undo, Redo, Trash2 } from 'lucide-react';
 import { getOrCreateStudentId } from '../utils/identity';
-import { saveStudentWork, loadStudentWork, cleanupOldSessions, clearSessionData, clearStudentWork } from '../utils/indexedDB';
 import './StudentNew.css';
 
 const BASE_CANVAS = { width: 800, height: 600 };
@@ -100,11 +99,9 @@ function Student() {
 
   const sessionInitRoomRef = useRef(null);
 
-  // Supabase session tracking
+  // Supabase session tracking (validation only)
   const [sessionId, setSessionId] = useState(null);
-  const [participantId, setParticipantId] = useState(null);
   const [sessionStatus, setSessionStatus] = useState('loading'); // 'loading' | 'waiting' | 'active' | 'ended' | 'no-session'
-  const [currentQuestionId, setCurrentQuestionId] = useState(null);
 
   // Student lines (editable, stored in base 800x600 coordinates)
   const [studentLines, setStudentLines] = useState([]);
@@ -121,10 +118,6 @@ function Student() {
   const [toolbarPosition, setToolbarPosition] = useState('left'); // 'left' or 'right'
   const [isMobile, setIsMobile] = useState(isMobileDevice());
   const visibilityListenerAttached = useRef(false);
-
-  // Stroke restoration state
-  const [isRestoringStrokes, setIsRestoringStrokes] = useState(false);
-  const hasLoadedFromRedisRef = useRef(false); // Track if we've loaded once
 
   // Redirect to login if missing name or room - DO THIS FIRST before any initialization
   useEffect(() => {
@@ -157,43 +150,11 @@ function Student() {
     setClientId(generatedClientId);
   }, [studentName, roomId]);
 
-  // Initialize persistent studentId and cleanup old data
+  // Initialize persistent studentId
   useEffect(() => {
     const id = getOrCreateStudentId();
     setStudentId(id);
-
-    // Cleanup old IndexedDB sessions (older than 7 days)
-    cleanupOldSessions(7).catch(err => {
-      console.error('Failed to cleanup old sessions:', err);
-    });
   }, []);
-
-  // Track previous sessionId to detect session changes
-  const previousSessionIdRef = useRef(null);
-
-  // Clear memory when switching to a different session
-  useEffect(() => {
-    if (!sessionId) return;
-
-    const previousSessionId = previousSessionIdRef.current;
-
-    // If we had a previous session and it's different from current, clear old data
-    if (previousSessionId && previousSessionId !== sessionId) {
-      console.log('🔄 Session changed from', previousSessionId, 'to', sessionId);
-      console.log('🗑️ Clearing IndexedDB memory for old session:', previousSessionId);
-
-      clearSessionData(previousSessionId)
-        .then(() => {
-          console.log('✅ IndexedDB memory cleared for old session');
-        })
-        .catch(err => {
-          console.error('❌ Failed to clear old session data:', err);
-        });
-    }
-
-    // Update the ref with current sessionId
-    previousSessionIdRef.current = sessionId;
-  }, [sessionId]);
 
   // Load saved preferences only when we have valid room and name
   useEffect(() => {
@@ -264,9 +225,6 @@ function Student() {
   useEffect(() => {
     teacherLinesRef.current = teacherLines;
   }, [teacherLines]);
-
-  // Track last published line count for incremental updates
-  const lastPublishedLineCountRef = useRef(0);
 
   const isRemoteUpdate = useRef(false);
   const eraserStateSaved = useRef(false);
@@ -345,7 +303,7 @@ function Student() {
     canvasScaleRef.current = canvasScale;
   }, [canvasSize, canvasScale]);
 
-  // Validate session and create participant record
+  // Validate session (check if session exists before allowing login)
   useEffect(() => {
     if (!roomId || !studentName || !clientId) {
       return;
@@ -358,9 +316,8 @@ function Student() {
     sessionInitRoomRef.current = roomId;
     let cancelled = false;
 
-    const initializeSession = async () => {
+    const validateSession = async () => {
       try {
-
         // Check if session exists for this room (case-insensitive)
         const { data: sessions, error: sessionError } = await supabase
           .from('sessions')
@@ -395,63 +352,18 @@ function Student() {
         setSessionId(session.id);
         setSessionStatus(session.status === 'active' ? 'active' : 'waiting');
 
-        // Check for existing participant by student_id (persistent) or client_id (legacy)
-        const { data: existingParticipant } = await supabase
-          .from('participants')
-          .select('*')
-          .eq('session_id', session.id)
-          .or(`student_id.eq.${studentId},client_id.eq.${clientId}`)
-          .maybeSingle();
-
-        if (existingParticipant) {
-          setParticipantId(existingParticipant.id);
-          // Update client_id if it changed (after refresh)
-          if (existingParticipant.client_id !== clientId) {
-            await supabase
-              .from('participants')
-              .update({ client_id: clientId })
-              .eq('id', existingParticipant.id);
-            console.log('✅ Updated participant client_id after refresh');
-          }
-          return;
-        }
-
-        if (cancelled) return;
-
-        const { data: participant, error: participantError } = await supabase
-          .from('participants')
-          .insert([
-            {
-              session_id: session.id,
-              client_id: clientId,
-              student_id: studentId,
-              name: studentName,
-              role: 'student',
-            }
-          ])
-          .select()
-          .single();
-
-        if (participantError) {
-          console.error('Failed to create participant:', participantError);
-          return;
-        }
-
-        if (cancelled) return;
-        setParticipantId(participant.id);
-
       } catch (error) {
-        console.error('Error initializing session:', error);
+        console.error('Error validating session:', error);
         setSessionStatus('no-session');
         sessionInitRoomRef.current = null;
       }
     };
 
-    initializeSession();
+    validateSession();
     return () => {
       cancelled = true;
     };
-  }, [roomId, clientId, studentName]);
+  }, [roomId, clientId, studentName, navigate]);
 
   // Initialize Ably connection
   useEffect(() => {
@@ -488,32 +400,6 @@ function Student() {
                 isVisible: !document.hidden
               });
               console.log('✅ Re-entered presence as:', studentName, 'with studentId:', studentId);
-
-              // Load from IndexedDB if in-memory state is empty
-              let linesToSend = studentLinesRef.current;
-              if ((!linesToSend || linesToSend.length === 0) && studentId && sessionId && currentQuestionId) {
-                console.log('🔄 In-memory state empty, loading from IndexedDB');
-                const saved = await loadStudentWork(studentId, sessionId, currentQuestionId);
-                if (saved?.lines) {
-                  linesToSend = saved.lines;
-                  setStudentLines(saved.lines);
-                }
-              }
-
-              // Publish stroke count after reconnection
-              if (linesToSend && linesToSend.length > 0) {
-                console.log('🔄 Publishing stroke count after reconnection:', linesToSend.length, 'lines');
-                await whiteboardChannel.publish('student-stroke-count', {
-                  studentId: studentId,
-                  strokeCount: linesToSend.length,
-                  timestamp: Date.now(),
-                });
-                lastPublishedLineCountRef.current = linesToSend.length;
-                console.log('✅ Stroke count published');
-              } else {
-                console.log('ℹ️ No strokes to report');
-                lastPublishedLineCountRef.current = 0;
-              }
 
               // Request current question state + annotations (combined in sync-full-state)
               setTimeout(() => {
@@ -560,70 +446,30 @@ function Student() {
             isRemoteUpdate.current = true;
             setTeacherLines(annotations);
 
-            // Save teacher annotations to IndexedDB immediately (async, non-blocking)
-            if (studentId && sessionId && currentQuestionId) {
-              saveStudentWork(
-                studentId,
-                sessionId,
-                currentQuestionId,
-                studentLinesRef.current,
-                {
-                  base: BASE_CANVAS,
-                  display: canvasSizeRef.current,
-                  scale: canvasScaleRef.current,
-                },
-                annotations
-              ).then(() => {
-                console.log('💾 Saved teacher annotation to IndexedDB');
-              }).catch(err => {
-                console.error('❌ Failed to save teacher annotation to IndexedDB:', err);
-              });
-            }
-
             setTimeout(() => {
               isRemoteUpdate.current = false;
             }, 100);
           }
         });
 
-        // Listen for full state sync (question + annotations combined - optimized flow)
+        // Listen for full state sync (content + annotations)
         subscribe('sync-full-state', (message) => {
           if (!isActive) return;
           if (message.data.targetClientId === clientId) {
-            const { content = null, questionId, annotations = [] } = message.data;
+            const { content = null, annotations = [] } = message.data;
 
             console.log('📨 Received sync-full-state:', {
-              questionId,
               hasContent: !!content,
               annotationCount: annotations.length
             });
 
             setSharedImage(content || null);
-            if (questionId !== undefined) {
-              setCurrentQuestionId(questionId || null);
-            }
 
             // Apply teacher annotations immediately
             if (annotations.length > 0) {
               console.log('✅ Applying', annotations.length, 'teacher annotations from sync');
               isRemoteUpdate.current = true;
               setTeacherLines(annotations);
-
-              // Save to IndexedDB
-              if (studentId && sessionId && currentQuestionId) {
-                saveStudentWork(
-                  studentId,
-                  sessionId,
-                  currentQuestionId,
-                  studentLinesRef.current,
-                  {
-                    base: BASE_CANVAS,
-                    display: canvasSizeRef.current,
-                    scale: canvasScaleRef.current,
-                  },
-                  annotations
-                );
-              }
 
               setTimeout(() => {
                 isRemoteUpdate.current = false;
@@ -637,11 +483,6 @@ function Student() {
           if (!isActive) return;
 
           console.log('📨 Received clear-all-drawings with content:', message.data);
-
-          // Update question ID
-          if (message.data?.questionId) {
-            setCurrentQuestionId(message.data.questionId);
-          }
 
           // Update shared image/content if provided
           if (message.data?.content) {
@@ -666,15 +507,9 @@ function Student() {
         });
 
         // Listen for session ended
-        subscribe('session-ended', async () => {
+        subscribe('session-ended', () => {
           if (!isActive) return;
-          console.log('🔚 Session ended - clearing IndexedDB memory for session:', sessionId);
-
-          // Clear all data for this session from IndexedDB
-          if (sessionId) {
-            await clearSessionData(sessionId);
-            console.log('✅ IndexedDB memory cleared for ended session');
-          }
+          console.log('🔚 Session ended');
 
           setSessionStatus('ended');
           navigate('/student-login');
@@ -695,12 +530,12 @@ function Student() {
 
         setChannel(whiteboardChannel);
 
-        // Request current question state + annotations (combined in sync-full-state response)
+        // Request current state (content + annotations)
         setTimeout(() => {
           if (!isActive) return;
           whiteboardChannel.publish('request-current-state', {
             clientId: clientId,
-            studentId: studentId, // Include persistent studentId for annotation lookup
+            studentId: studentId,
             timestamp: Date.now(),
           });
         }, 500);
@@ -818,253 +653,6 @@ function Student() {
     };
   }, [toolbarPosition, isMobile]);
 
-  // Load saved work from Redis ONLY on initial mount (page refresh)
-  // Question changes are handled by Ably real-time messages, no need to reload
-  useEffect(() => {
-    if (!studentId || !sessionId || !currentQuestionId || !channel) return;
-    if (hasLoadedFromRedisRef.current) return; // Only load once
-
-    const loadSavedWork = async () => {
-      console.log('🔄 Initial load: Loading strokes from Redis for question:', currentQuestionId);
-      hasLoadedFromRedisRef.current = true; // Mark as loaded
-
-      // Show loading state
-      setIsRestoringStrokes(true);
-
-      // Reset counter for new question
-      lastPublishedLineCountRef.current = 0;
-
-      try {
-        // Fetch strokes from Redis
-        const response = await fetch(
-          `/api/strokes/load?sessionId=${sessionId}&questionId=${currentQuestionId}&userId=${studentId}`
-        );
-
-        if (!response.ok) {
-          throw new Error('Failed to load strokes from Redis');
-        }
-
-        const data = await response.json();
-        const { studentStrokes = [], teacherStrokes = [] } = data;
-
-        console.log('📂 Loaded from Redis:', studentStrokes.length, 'student strokes +', teacherStrokes.length, 'teacher strokes');
-
-        // Apply strokes to canvas
-        isRemoteUpdate.current = true;
-        setStudentLines(studentStrokes);
-        setTeacherLines(teacherStrokes);
-
-        // Also save to IndexedDB as backup
-        if (studentStrokes.length > 0 || teacherStrokes.length > 0) {
-          await saveStudentWork(
-            studentId,
-            sessionId,
-            currentQuestionId,
-            studentStrokes,
-            {
-              base: BASE_CANVAS,
-              display: canvasSize,
-              scale: canvasScale,
-            },
-            teacherStrokes
-          );
-          console.log('💾 Backed up to IndexedDB');
-        }
-
-        // Publish stroke count
-        setTimeout(() => {
-          channel.publish('student-stroke-count', {
-            studentId: studentId,
-            strokeCount: studentStrokes.length,
-            timestamp: Date.now(),
-          });
-          lastPublishedLineCountRef.current = studentStrokes.length;
-          isRemoteUpdate.current = false;
-        }, 100);
-
-      } catch (error) {
-        console.error('❌ Failed to load from Redis, trying IndexedDB fallback:', error);
-
-        // Fallback to IndexedDB if Redis fails
-        try {
-          const saved = await loadStudentWork(studentId, sessionId, currentQuestionId);
-          if (saved?.lines) {
-            isRemoteUpdate.current = true;
-            setStudentLines(saved.lines);
-            setTeacherLines(saved.teacherAnnotations || []);
-            setTimeout(() => {
-              isRemoteUpdate.current = false;
-            }, 100);
-            console.log('📂 Loaded from IndexedDB fallback:', saved.lines.length, 'lines');
-          }
-        } catch (fallbackError) {
-          console.error('❌ IndexedDB fallback also failed:', fallbackError);
-        }
-      }
-
-      // Hide loading state
-      setIsRestoringStrokes(false);
-    };
-
-    loadSavedWork();
-  }, [studentId, sessionId, currentQuestionId, channel]);
-
-  // Sync student lines to Ably, IndexedDB, and Redis (per-stroke)
-  useEffect(() => {
-    if (!clientId || !channel || isRemoteUpdate.current) {
-      return;
-    }
-
-    const timer = setTimeout(async () => {
-      if (studentId && sessionId && currentQuestionId) {
-        const lineCount = studentLines.length;
-
-        // Save to IndexedDB (local backup)
-        await saveStudentWork(
-          studentId,
-          sessionId,
-          currentQuestionId,
-          studentLines,
-          {
-            base: BASE_CANVAS,
-            display: canvasSize,
-            scale: canvasScale,
-          },
-          teacherLinesRef.current
-        );
-        console.log('💾 Saved to IndexedDB:', lineCount, 'lines');
-
-        // Save to Redis (for persistence across refreshes)
-        try {
-          await fetch('/api/strokes/save', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              sessionId,
-              questionId: currentQuestionId,
-              userId: studentId,
-              role: 'student',
-              strokes: studentLines
-            })
-          });
-          console.log('☁️ Saved to Redis:', lineCount, 'lines');
-        } catch (error) {
-          console.error('❌ Failed to save to Redis:', error);
-        }
-      }
-
-      // Publish lightweight stroke count (for real-time updates)
-      channel.publish('student-stroke-count', {
-        studentId: studentId,
-        strokeCount: studentLines.length,
-        timestamp: Date.now(),
-      });
-
-      lastPublishedLineCountRef.current = studentLines.length;
-    }, 150);
-
-    return () => clearTimeout(timer);
-  }, [studentLines, channel, clientId, canvasSize, canvasScale, studentName, studentId, sessionId, currentQuestionId]);
-
-
-  // Auto-save student work to Supabase every 10 seconds
-  useEffect(() => {
-    if (!sessionId || !participantId || !currentQuestionId || sessionStatus !== 'active') {
-      return;
-    }
-
-    const autoSave = async () => {
-      try {
-        // Check if annotation exists for this question and student
-        const { data: existing, error: queryError } = await supabase
-          .from('annotations')
-          .select('id')
-          .eq('question_id', currentQuestionId)
-          .eq('participant_id', participantId)
-          .maybeSingle(); // Use maybeSingle() instead of single() to avoid 406 error
-
-        const annotationData = {
-          session_id: sessionId,
-          question_id: currentQuestionId,
-          participant_id: participantId,
-          student_lines: studentLinesRef.current, // Use ref to get latest lines
-        };
-
-        if (queryError) {
-          console.error('Failed to query annotation:', queryError);
-          return;
-        }
-
-        if (existing) {
-          // Update existing annotation
-          const { error: updateError } = await supabase
-            .from('annotations')
-            .update(annotationData)
-            .eq('id', existing.id);
-
-          if (updateError) {
-            console.error('Failed to update annotation:', updateError);
-          }
-        } else {
-          // Create new annotation
-          const { error: insertError } = await supabase
-            .from('annotations')
-            .insert([annotationData]);
-
-          if (insertError) {
-            console.error('Failed to create annotation:', insertError);
-          }
-        }
-      } catch (error) {
-        console.error('Auto-save error:', error);
-      }
-    };
-
-    // Save every 10 seconds (don't save immediately to avoid excessive saves)
-    const interval = setInterval(autoSave, 10000);
-
-    return () => clearInterval(interval);
-  }, [sessionId, participantId, currentQuestionId, sessionStatus]); // Removed studentLines from deps
-
-  // Separate effect to save immediately when question changes
-  useEffect(() => {
-    if (!sessionId || !participantId || !currentQuestionId || sessionStatus !== 'active') {
-      return;
-    }
-
-    const saveOnQuestionChange = async () => {
-      try {
-        const { data: existing } = await supabase
-          .from('annotations')
-          .select('id')
-          .eq('question_id', currentQuestionId)
-          .eq('participant_id', participantId)
-          .maybeSingle();
-
-        const annotationData = {
-          session_id: sessionId,
-          question_id: currentQuestionId,
-          participant_id: participantId,
-          student_lines: studentLines,
-        };
-
-        if (existing) {
-          await supabase
-            .from('annotations')
-            .update(annotationData)
-            .eq('id', existing.id);
-        } else {
-          await supabase
-            .from('annotations')
-            .insert([annotationData]);
-        }
-      } catch (error) {
-        console.error('Error saving on question change:', error);
-      }
-    };
-
-    saveOnQuestionChange();
-  }, [currentQuestionId]); // Only run when question changes
 
   const isAllowedPointerEvent = (evt) => {
     if (inputMode !== 'stylus-only') return true;
@@ -1073,14 +661,6 @@ function Student() {
 
   const handlePointerDown = (e) => {
     const evt = e.evt;
-
-    // Disable drawing while restoring strokes
-    if (isRestoringStrokes) {
-      if (evt?.preventDefault) {
-        evt.preventDefault();
-      }
-      return;
-    }
 
     if (!isAllowedPointerEvent(evt)) {
       if (evt?.preventDefault) {
@@ -1240,38 +820,10 @@ function Student() {
     }
   };
 
-  const handleClear = async () => {
+  const handleClear = () => {
     undoStack.current.push([...studentLines]);
     redoStack.current = [];
     setStudentLines([]);
-
-    // Clear from Redis
-    if (sessionId && currentQuestionId && studentId) {
-      try {
-        await fetch('/api/strokes/clear', {
-          method: 'DELETE',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            sessionId,
-            questionId: currentQuestionId,
-            userId: studentId,
-            role: 'student'
-          })
-        });
-        console.log('🗑️ Cleared student strokes from Redis');
-      } catch (error) {
-        console.error('❌ Failed to clear from Redis:', error);
-      }
-    }
-
-    // Publish stroke count update
-    if (channel) {
-      await channel.publish('student-stroke-count', {
-        studentId: studentId,
-        strokeCount: 0,
-        timestamp: Date.now(),
-      });
-    }
   };
 
   const getShortClientId = () => {
@@ -1371,17 +923,6 @@ function Student() {
             <p style={{ marginTop: '1rem', fontSize: '0.9rem', opacity: 0.8 }}>
               Redirecting to login...
             </p>
-          </div>
-        </div>
-      )}
-
-      {/* Stroke restoration overlay */}
-      {isRestoringStrokes && sessionStatus === 'active' && (
-        <div className="session-overlay" style={{ background: 'rgba(0, 0, 0, 0.5)' }}>
-          <div className="session-message">
-            <div className="session-spinner"></div>
-            <h2>Restoring canvas...</h2>
-            <p>Loading your previous work and teacher annotations</p>
           </div>
         </div>
       )}

@@ -7,16 +7,6 @@ import StudentCard from '../components/StudentCard';
 import AnnotationModal from '../components/AnnotationModal';
 import { resizeAndCompressImage } from '../utils/imageUtils';
 import { supabase } from '../supabaseClient';
-import {
-  saveSessionState,
-  loadSessionState,
-  saveTeacherAnnotation,
-  loadTeacherAnnotations,
-  loadTeacherOwnAnnotations,
-  clearTeacherAnnotations,
-  cleanupOldSessions,
-  clearSessionData
-} from '../utils/indexedDB';
 import './TeacherDashboard.css';
 
 const TeacherDashboard = () => {
@@ -53,18 +43,14 @@ const TeacherDashboard = () => {
     roomInitialisedRef.current = true;
   }, [searchParams, setSearchParams]);
 
-  // Supabase session tracking
+  // Supabase session tracking (validation only)
   const [sessionId, setSessionId] = useState(null);
-  const [participantId, setParticipantId] = useState(null);
-  const [currentQuestionId, setCurrentQuestionId] = useState(null);
-  const [questionNumber, setQuestionNumber] = useState(0);
   const [sessionStatus, setSessionStatus] = useState('created'); // 'created' | 'active' | 'ended'
 
   // Ably connection
   const [ably, setAbly] = useState(null);
   const [channel, setChannel] = useState(null);
   const [isConnected, setIsConnected] = useState(false);
-  const [sessionStateLoaded, setSessionStateLoaded] = useState(false); // Track if IndexedDB loaded
   const [clientId] = useState(`teacher-${Math.random().toString(36).substring(7)}`);
 
   // Student management (keyed by persistent studentId, not volatile clientId)
@@ -80,7 +66,6 @@ const TeacherDashboard = () => {
           studentId: studentId,
           clientId: `bot-${i}`,
           name: `Bot ${i}`,
-          strokeCount: 0, // Track count, not actual strokes
           lastUpdate: Date.now() - (i * 1000),
           isActive: true,
           isFlagged: false,
@@ -111,8 +96,6 @@ const TeacherDashboard = () => {
   const [sharedImage, setSharedImage] = useState(null); // Shared image sent to all students
   const sharedImageRef = useRef(null); // Ref to access latest sharedImage in callbacks
   const teacherAnnotationsRef = useRef({}); // Ref to access latest teacherAnnotations in callbacks
-  const currentQuestionIdRef = useRef(null);
-  const questionNumberRef = useRef(0);
   const logoutTimerRef = useRef(null);
   const imageInputRef = useRef(null);
   const linkInputRef = useRef(null); // Ref for the student link input field
@@ -122,10 +105,8 @@ const TeacherDashboard = () => {
 
   const isRemoteUpdate = useRef(false);
   const sessionInitStateRef = useRef({ roomId: null, status: 'idle' });
-  const participantInitRef = useRef(false);
   const joinedStudentsRef = useRef(new Set()); // Track students who have already joined this session
   const ablyInitializedRef = useRef(false); // Track if Ably has been initialized to prevent duplicates
-  const sessionSaveTimerRef = useRef(null);
 
   // Keep ref updated with latest sharedImage
   useEffect(() => {
@@ -136,46 +117,6 @@ const TeacherDashboard = () => {
   useEffect(() => {
     teacherAnnotationsRef.current = teacherAnnotations;
   }, [teacherAnnotations]);
-
-  useEffect(() => {
-    currentQuestionIdRef.current = currentQuestionId;
-  }, [currentQuestionId]);
-
-  useEffect(() => {
-    questionNumberRef.current = questionNumber;
-  }, [questionNumber]);
-
-  // Persist dashboard state shortly after changes so refresh restores latest strokes
-  useEffect(() => {
-    if (!sessionId) {
-      return;
-    }
-
-    if (sessionSaveTimerRef.current) {
-      clearTimeout(sessionSaveTimerRef.current);
-    }
-
-    sessionSaveTimerRef.current = setTimeout(async () => {
-      sessionSaveTimerRef.current = null;
-      try {
-        await saveSessionState(sessionId, {
-          students,
-          questionNumber,
-          currentQuestionId,
-          sharedImage,
-        });
-      } catch (error) {
-        console.error('❌ Failed to save session state (debounced):', error);
-      }
-    }, 400);
-
-    return () => {
-      if (sessionSaveTimerRef.current) {
-        clearTimeout(sessionSaveTimerRef.current);
-        sessionSaveTimerRef.current = null;
-      }
-    };
-  }, [sessionId, students, questionNumber, currentQuestionId, sharedImage]);
 
   // Toast notification helper
   const toastIdCounter = useRef(0);
@@ -210,12 +151,6 @@ const TeacherDashboard = () => {
         });
       }
 
-      try {
-        await clearSessionData(sessionId);
-      } catch (clearError) {
-        console.error('Failed to clear local session data:', clearError);
-      }
-
       setSessionStatus('ended');
 
       if (logoutTimerRef.current) {
@@ -248,7 +183,6 @@ const TeacherDashboard = () => {
     // Reset state when room changes
     if (sessionInitStateRef.current.roomId !== roomId) {
       sessionInitStateRef.current = { roomId, status: 'idle' };
-      participantInitRef.current = false;
     }
 
     if (sessionInitStateRef.current.status === 'in-progress' || sessionInitStateRef.current.status === 'done') {
@@ -263,7 +197,6 @@ const TeacherDashboard = () => {
       const current = sessionInitStateRef.current;
       if (!cancelled && current.roomId === roomId) {
         sessionInitStateRef.current = { roomId, status: 'idle' };
-        participantInitRef.current = false;
       }
     };
 
@@ -362,46 +295,6 @@ const TeacherDashboard = () => {
           setSessionId(session.id);
           setSessionStatus(session.status);
 
-          if (!participantInitRef.current) {
-            // Check for existing teacher participant to avoid duplicates (Strict Mode, reconnects)
-            const { data: existingParticipant, error: existingParticipantError } = await supabase
-              .from('participants')
-              .select('*')
-              .eq('session_id', session.id)
-              .eq('client_id', clientId)
-              .eq('role', 'teacher')
-              .maybeSingle();
-
-            if (existingParticipantError) {
-              console.error('Failed to check existing teacher participant:', existingParticipantError);
-            }
-
-            if (existingParticipant) {
-              setParticipantId(existingParticipant.id);
-              participantInitRef.current = true;
-            } else {
-              const { data: participant, error: participantError } = await supabase
-                .from('participants')
-                .insert([
-                  {
-                    session_id: session.id,
-                    client_id: clientId,
-                    name: 'Teacher',
-                    role: 'teacher',
-                  }
-                ])
-                .select()
-                .single();
-
-              if (participantError) {
-                console.error('Failed to create teacher participant:', participantError);
-              } else {
-                setParticipantId(participant.id);
-                participantInitRef.current = true;
-              }
-            }
-          }
-
           if (!cancelled) {
             sessionInitStateRef.current = { roomId, status: 'done' };
           }
@@ -421,80 +314,9 @@ const TeacherDashboard = () => {
       const current = sessionInitStateRef.current;
       if (current.roomId === roomId && current.status === 'in-progress') {
         sessionInitStateRef.current = { roomId, status: 'idle' };
-        participantInitRef.current = false;
       }
     };
   }, [roomId, clientId]);
-
-  // Load session state from IndexedDB and cleanup old data
-  useEffect(() => {
-    if (!sessionId) return;
-
-    const loadAndCleanup = async () => {
-      try {
-        // Cleanup old sessions (older than 7 days)
-        await cleanupOldSessions(7);
-
-        // Load saved session state from IndexedDB
-        const savedState = await loadSessionState(sessionId);
-
-        if (savedState) {
-
-          // Restore student work
-          if (savedState.students && Object.keys(savedState.students).length > 0) {
-            setStudents(savedState.students);
-          }
-
-          // Restore question state
-          if (savedState.questionNumber !== undefined) {
-            setQuestionNumber(savedState.questionNumber);
-            questionNumberRef.current = savedState.questionNumber;
-          }
-          if (savedState.currentQuestionId) {
-            setCurrentQuestionId(savedState.currentQuestionId);
-            currentQuestionIdRef.current = savedState.currentQuestionId;
-
-            // Load teacher annotations for current question from Redis
-            const loadedAnnotations = {};
-            if (savedState.students) {
-              for (const studentId of Object.keys(savedState.students)) {
-                try {
-                  const response = await fetch(
-                    `/api/strokes/load?sessionId=${sessionId}&questionId=${savedState.currentQuestionId}&userId=${studentId}`
-                  );
-                  if (response.ok) {
-                    const data = await response.json();
-                    if (data.teacherStrokes && data.teacherStrokes.length > 0) {
-                      loadedAnnotations[studentId] = data.teacherStrokes;
-                    }
-                  }
-                } catch (error) {
-                  console.error(`❌ Failed to load annotations for student ${studentId}:`, error);
-                }
-              }
-            }
-
-            if (Object.keys(loadedAnnotations).length > 0) {
-              setTeacherAnnotations(loadedAnnotations);
-              console.log('📂 Loaded', Object.keys(loadedAnnotations).length, 'teacher annotations from Redis');
-            }
-          } else {
-            currentQuestionIdRef.current = null;
-          }
-          if (savedState.sharedImage) {
-            setSharedImage(savedState.sharedImage);
-          }
-        }
-      } catch (error) {
-        console.error('❌ Failed to load session state:', error);
-      } finally {
-        // Mark as loaded regardless of success/failure
-        setSessionStateLoaded(true);
-      }
-    };
-
-    loadAndCleanup();
-  }, [sessionId]);
 
   // Auto-logout teacher after 10 minutes of inactivity (disconnection)
   useEffect(() => {
@@ -534,10 +356,10 @@ const TeacherDashboard = () => {
     };
   }, []);
 
-  // Connect to Ably (only after session state is loaded)
+  // Connect to Ably
   useEffect(() => {
-    // Prevent duplicate initialization & wait for IndexedDB to load first
-    if (ablyInitializedRef.current || !roomId || !clientId || !sessionStateLoaded) {
+    // Prevent duplicate initialization
+    if (ablyInitializedRef.current || !roomId || !clientId) {
       return;
     }
 
@@ -603,26 +425,7 @@ const TeacherDashboard = () => {
         // Get channel
         whiteboardChannel = ablyClient.channels.get(`room-${roomId}`);
 
-        // Subscribe to lightweight stroke count updates (not full stroke data)
-        whiteboardChannel.subscribe('student-stroke-count', (message) => {
-          const { studentId, strokeCount } = message.data;
-
-          if (!studentId) return;
-
-          setStudents(prev => {
-            // If student doesn't exist yet, don't create entry (wait for presence)
-            if (!prev[studentId]) return prev;
-
-            return {
-              ...prev,
-              [studentId]: {
-                ...prev[studentId],
-                strokeCount: strokeCount || 0,
-                lastUpdate: Date.now(),
-              }
-            };
-          });
-        });
+        // Removed: Subscribe to stroke count updates (will be replaced with real-time stroke subscription)
 
         // Listen for presence events (student connect/disconnect)
         whiteboardChannel.presence.subscribe('enter', (member) => {
@@ -655,7 +458,7 @@ const TeacherDashboard = () => {
                 return {
                   ...prev,
                   [incomingStudentId]: {
-                    ...existingStudent,           // Preserve all state (strokeCount, flags, etc.)
+                    ...existingStudent,           // Preserve all state (flags, etc.)
                     clientId: incomingClientId,  // Update to new clientId for Ably delivery
                     name: studentName,
                     isActive: true,
@@ -677,7 +480,6 @@ const TeacherDashboard = () => {
                   studentId: incomingStudentId,
                   clientId: incomingClientId,
                   name: studentName,
-                  strokeCount: 0,
                   isActive: true,
                   isVisible: member.data?.isVisible !== false,
                   lastUpdate: Date.now(),
@@ -686,16 +488,14 @@ const TeacherDashboard = () => {
               };
             });
 
-            // Send current question state + annotations immediately (combined message)
+            // Send current shared image if exists
             setTimeout(() => {
               const annotations = teacherAnnotationsRef.current?.[incomingStudentId] || [];
 
               whiteboardChannel.publish('sync-full-state', {
                 targetClientId: incomingClientId,
                 content: sharedImageRef.current || null,
-                questionId: currentQuestionIdRef.current,
-                questionNumber: questionNumberRef.current,
-                annotations: annotations, // Send annotations immediately, not via separate request
+                annotations: annotations,
                 timestamp: Date.now(),
               });
 
@@ -770,19 +570,17 @@ const TeacherDashboard = () => {
           setSharedImage(message.data);
         });
 
-        // Listen for students requesting current question state (fallback)
+        // Listen for students requesting current state (fallback)
         whiteboardChannel.subscribe('request-current-state', (message) => {
           const requestingStudentId = message.data?.studentId;
 
-          // Send current question state + annotations to the requesting student
+          // Send current shared image + annotations to the requesting student
           setTimeout(() => {
             const annotations = teacherAnnotationsRef.current?.[requestingStudentId] || [];
 
             whiteboardChannel.publish('sync-full-state', {
               targetClientId: message.clientId,
               content: sharedImageRef.current || null,
-              questionId: currentQuestionIdRef.current,
-              questionNumber: questionNumberRef.current,
               annotations: annotations,
               timestamp: Date.now(),
             });
@@ -814,9 +612,9 @@ const TeacherDashboard = () => {
 
             const existingStudent = students[memberStudentId] || {};
 
-            // Merge: Keep restored data (strokeCount, etc.), update presence data (clientId, isActive, etc.)
+            // Merge: Keep restored data (flags, etc.), update presence data (clientId, isActive, etc.)
             currentStudents[memberStudentId] = {
-              ...existingStudent, // Keep all restored data (strokeCount, studentId, flags, etc.)
+              ...existingStudent, // Keep all restored data (studentId, flags, etc.)
               studentId: memberStudentId,
               clientId: member.clientId, // Update to current clientId
               name: studentName,
@@ -824,7 +622,6 @@ const TeacherDashboard = () => {
               isVisible: member.data?.isVisible !== false,
               lastUpdate: Date.now(),
               isFlagged: existingStudent.isFlagged || false,
-              strokeCount: existingStudent.strokeCount || 0,
             };
           }
         });
@@ -832,49 +629,6 @@ const TeacherDashboard = () => {
         setStudents(currentStudents);
 
         setChannel(whiteboardChannel);
-
-        if (!participantInitRef.current && sessionId) {
-          // Failsafe in case session effect didn't run yet
-          try {
-            const { data: existingParticipant, error: existingParticipantError } = await supabase
-              .from('participants')
-              .select('*')
-              .eq('session_id', sessionId)
-              .eq('client_id', clientId)
-              .eq('role', 'teacher')
-              .maybeSingle();
-
-            if (existingParticipantError) {
-              console.error('Failed to check existing teacher participant during Ably init:', existingParticipantError);
-            }
-
-            if (existingParticipant) {
-              setParticipantId(existingParticipant.id);
-              participantInitRef.current = true;
-            } else {
-              const { data: participant, error: participantError } = await supabase
-                .from('participants')
-                .insert([
-                  {
-                    session_id: sessionId,
-                    client_id: clientId,
-                    role: 'teacher',
-                  }
-                ])
-                .select()
-                .single();
-
-              if (participantError) {
-                console.error('Failed to create teacher participant during Ably init:', participantError);
-              } else {
-                setParticipantId(participant.id);
-                participantInitRef.current = true;
-              }
-            }
-          } catch (error) {
-            console.error('Error ensuring teacher participant during Ably init:', error);
-          }
-        }
       } catch (error) {
         console.error('Failed to connect to Ably:', error);
       }
@@ -895,49 +649,7 @@ const TeacherDashboard = () => {
         ablyClient.close();
       }
     };
-  }, [roomId, clientId, sessionStateLoaded]); // Wait for IndexedDB to load first
-
-  // Auto-save session state to IndexedDB every 10 seconds (metadata only, no stroke data)
-  useEffect(() => {
-    if (!sessionId) return;
-
-    const interval = setInterval(async () => {
-      try {
-        await saveSessionState(sessionId, {
-          students: students, // Only contains metadata (studentId, name, strokeCount, flags) - no stroke data
-          questionNumber: questionNumber,
-          currentQuestionId: currentQuestionId,
-          sharedImage: sharedImage,
-        });
-        console.log('💾 Auto-saved session metadata to IndexedDB');
-      } catch (error) {
-        console.error('❌ Failed to auto-save session state:', error);
-      }
-    }, 10000); // Every 10 seconds
-
-    return () => clearInterval(interval);
-  }, [sessionId, students, questionNumber, currentQuestionId, sharedImage]);
-
-  // Auto-save teacher annotations to IndexedDB every 10 seconds
-  useEffect(() => {
-    if (!sessionId || !currentQuestionId) return;
-
-    const interval = setInterval(async () => {
-      try {
-        // Save all teacher annotations for current question
-        const annotationCount = Object.keys(teacherAnnotations).length;
-        if (annotationCount > 0) {
-          for (const [targetStudentId, annotations] of Object.entries(teacherAnnotations)) {
-            await saveTeacherAnnotation(sessionId, targetStudentId, currentQuestionId, annotations);
-          }
-        }
-      } catch (error) {
-        console.error('❌ Failed to auto-save teacher annotations:', error);
-      }
-    }, 10000); // Every 10 seconds
-
-    return () => clearInterval(interval);
-  }, [sessionId, currentQuestionId, teacherAnnotations]);
+  }, [roomId, clientId]);
 
   // Extract friendly name from clientId
   const extractStudentName = (clientId) => {
@@ -973,35 +685,6 @@ const TeacherDashboard = () => {
       ...prev,
       [persistentStudentId]: annotations,
     }));
-
-    // Save to IndexedDB using persistent studentId
-    if (sessionId && currentQuestionId) {
-      try {
-        await saveTeacherAnnotation(sessionId, persistentStudentId, currentQuestionId, annotations);
-      } catch (error) {
-        console.error('❌ Failed to save teacher annotation:', error);
-      }
-    }
-
-    // Save to Redis for persistence across refreshes
-    if (sessionId && currentQuestionId) {
-      try {
-        await fetch('/api/strokes/save', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            sessionId,
-            questionId: currentQuestionId,
-            userId: persistentStudentId,
-            role: 'teacher',
-            strokes: annotations
-          })
-        });
-        console.log('☁️ Saved teacher annotations to Redis:', annotations.length, 'strokes');
-      } catch (error) {
-        console.error('❌ Failed to save annotations to Redis:', error);
-      }
-    }
 
     // Publish annotations to Ably using current clientId for delivery (for real-time updates)
     channel.publish('teacher-annotation', {
@@ -1296,14 +979,13 @@ const TeacherDashboard = () => {
       return;
     }
 
-    setImageMessage('Sending question to class...');
+    setImageMessage('Sending to class...');
 
     try {
       // If this is the first content being sent, start the session
-      const isFirstQuestion = sessionStatus === 'created';
+      const isFirstContent = sessionStatus === 'created';
 
-      if (isFirstQuestion) {
-
+      if (isFirstContent) {
         // Update session to 'active'
         const { error: sessionError } = await supabase
           .from('sessions')
@@ -1326,115 +1008,7 @@ const TeacherDashboard = () => {
           timestamp: Date.now(),
           sessionId: sessionId,
         });
-
       }
-
-      // BEFORE moving to next question: Save all current work to Supabase
-      if (currentQuestionId) {
-        console.log('💾 Saving teacher annotations from Q', questionNumber, 'to Supabase before moving to next question');
-
-        // Save teacher annotations to Supabase
-        // Note: Students save their own work, so teacher only needs to save annotations
-        const savePromises = [];
-
-        for (const [targetStudentId, annotations] of Object.entries(teacherAnnotations)) {
-          if (annotations.length > 0) {
-            // Find participant by persistent studentId
-            // Note: participant.client_id may be outdated after student refresh, but participant_id is stable
-            const student = students[targetStudentId];
-
-            if (student) {
-              const { data: participant } = await supabase
-                .from('participants')
-                .select('id')
-                .eq('session_id', sessionId)
-                .eq('client_id', student.clientId) // Use current clientId from state
-                .eq('role', 'student')
-                .maybeSingle();
-
-              if (participant) {
-                const savePromise = supabase
-                  .from('annotations')
-                  .upsert({
-                    session_id: sessionId,
-                    participant_id: participant.id,
-                    question_id: currentQuestionId,
-                    student_lines: [], // Students save their own lines
-                    teacher_annotations: annotations,
-                    last_updated_at: new Date().toISOString(),
-                  }, {
-                    onConflict: 'participant_id,question_id'
-                  });
-
-                savePromises.push(savePromise);
-              }
-            }
-          }
-        }
-
-        // Wait for all saves to complete
-        if (savePromises.length > 0) {
-          try {
-            await Promise.all(savePromises);
-            console.log(`✅ Saved annotations for ${savePromises.length} students to Supabase`);
-          } catch (saveError) {
-            console.error('❌ Failed to save some annotations to Supabase:', saveError);
-            // Continue anyway - annotations are still in IndexedDB
-          }
-        }
-      }
-
-      // Increment question number
-      const newQuestionNumber = questionNumber + 1;
-      setQuestionNumber(newQuestionNumber);
-      questionNumberRef.current = newQuestionNumber;
-
-      // Determine content type and data
-      let contentType = 'blank';
-      let templateType = null;
-      let imageData = null;
-
-      if (prepTab === 'templates' && stagedTemplate) {
-        contentType = 'template';
-        templateType = stagedTemplate.type;
-        imageData = {
-          dataUrl: stagedTemplate.dataUrl,
-          width: stagedTemplate.width,
-          height: stagedTemplate.height,
-        };
-      } else if (prepTab === 'image' && stagedImage) {
-        contentType = 'image';
-        imageData = {
-          dataUrl: stagedImage.dataUrl,
-          width: stagedImage.width,
-          height: stagedImage.height,
-          filename: stagedImage.filename,
-        };
-      }
-
-      // Create question record in Supabase
-      const { data: question, error: questionError } = await supabase
-        .from('questions')
-        .insert([
-          {
-            session_id: sessionId,
-            question_number: newQuestionNumber,
-            content_type: contentType,
-            template_type: templateType,
-            image_data: imageData,
-          }
-        ])
-        .select()
-        .single();
-
-      if (questionError) {
-        console.error('Failed to create question:', questionError);
-        setImageMessage('Failed to save question. Please try again.');
-        return;
-      }
-
-      setCurrentQuestionId(question.id);
-      currentQuestionIdRef.current = question.id;
 
       // Prepare content for the message
       let content = null;
@@ -1448,7 +1022,6 @@ const TeacherDashboard = () => {
       // Clear all student drawings and teacher annotations + send content in ONE message
       await channel.publish('clear-all-drawings', {
         timestamp: Date.now(),
-        questionId: question.id,
         content: content, // Include content directly
       });
 
@@ -1469,20 +1042,20 @@ const TeacherDashboard = () => {
       if (prepTab === 'blank') {
         setSharedImage(null);
         setStagedTemplate(null);
-        setImageMessage(`Question ${newQuestionNumber}: Blank canvas sent to all students.`);
+        setImageMessage('Blank canvas sent to all students.');
       } else if (prepTab === 'templates' && stagedTemplate) {
         setSharedImage(stagedTemplate);
-        setImageMessage(`Question ${newQuestionNumber}: Template sent to all students.`);
+        setImageMessage('Template sent to all students.');
       } else if (prepTab === 'image' && stagedImage) {
         setSharedImage(stagedImage);
-        setImageMessage(`Question ${newQuestionNumber}: Image sent to all students.`);
+        setImageMessage('Image sent to all students.');
       }
 
-      showToast(`Question ${newQuestionNumber} sent!`, 'success');
+      showToast('Content sent!', 'success');
     } catch (error) {
       console.error('Failed to send to class:', error);
       setImageMessage('Failed to send. Please try again.');
-      showToast('Failed to send question', 'error');
+      showToast('Failed to send content', 'error');
     }
   };
 
