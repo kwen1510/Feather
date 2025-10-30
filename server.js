@@ -289,17 +289,40 @@ const server = createServer(async (req, res) => {
         const linesKey = getStudentLinesKey(roomId, studentId);
         const annotationsKey = getTeacherAnnotationsKey(roomId, studentId);
 
-        const [lines, annotations] = await Promise.all([
-          redis.get(linesKey),
-          redis.get(annotationsKey)
-        ]);
+        try {
+          const [lines, annotations] = await Promise.all([
+            redis.get(linesKey),
+            redis.get(annotationsKey)
+          ]);
 
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({
-          studentId,
-          lines: lines ? JSON.parse(lines) : [],
-          annotations: annotations ? JSON.parse(annotations) : []
-        }));
+          // Handle Redis returning null, objects, or strings
+          let parsedLines = [];
+          let parsedAnnotations = [];
+
+          if (lines) {
+            parsedLines = typeof lines === 'string' ? JSON.parse(lines) : (Array.isArray(lines) ? lines : []);
+          }
+          
+          if (annotations) {
+            parsedAnnotations = typeof annotations === 'string' ? JSON.parse(annotations) : (Array.isArray(annotations) ? annotations : []);
+          }
+
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            studentId,
+            lines: parsedLines,
+            annotations: parsedAnnotations
+          }));
+        } catch (parseError) {
+          console.error(`Error loading data for student ${studentId}:`, parseError.message);
+          // Return empty data if parsing fails
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            studentId,
+            lines: [],
+            annotations: []
+          }));
+        }
         return;
       }
 
