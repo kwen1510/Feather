@@ -429,81 +429,105 @@ const TeacherDashboard = () => {
 
         // Listen for presence events (student connect/disconnect)
         whiteboardChannel.presence.subscribe('enter', (member) => {
-          if (member.clientId !== clientId && member.clientId.includes('student')) {
-            const studentName = member.data?.name || extractStudentName(member.clientId);
-            const incomingClientId = member.clientId;
-            const incomingStudentId = member.data?.studentId;
+          // Skip non-student members
+          if (!member.clientId || member.clientId === clientId || !member.clientId.includes('student')) {
+            return;
+          }
 
-            if (!incomingStudentId) {
-              console.warn('⚠️ Student joined without persistent studentId:', incomingClientId);
-              return;
-            }
+          const studentName = member.data?.name || extractStudentName(member.clientId);
+          const incomingClientId = member.clientId;
+          const incomingStudentId = member.data?.studentId;
 
-            setStudents(prev => {
-              // Check if student already exists (keyed by persistent studentId)
-              const existingStudent = prev[incomingStudentId];
+          console.log('👤 Presence enter event:', {
+            studentName,
+            incomingClientId,
+            incomingStudentId,
+            hasData: !!member.data
+          });
 
-              if (existingStudent) {
-                // Student reconnected - update clientId and presence
-                console.log('🔄 Student reconnected:', existingStudent.clientId, '→', incomingClientId, '(', studentName, ')');
+          if (!incomingStudentId) {
+            console.warn('⚠️ Student joined without persistent studentId:', incomingClientId);
+            return;
+          }
 
-                // Update selectedStudent if teacher has modal open with this student
-                if (selectedStudent?.studentId === incomingStudentId) {
-                  setSelectedStudent({
-                    ...existingStudent,
-                    clientId: incomingClientId,
-                  });
-                }
+          if (!incomingClientId) {
+            console.warn('⚠️ Student joined without clientId:', incomingStudentId);
+            return;
+          }
 
-                return {
-                  ...prev,
-                  [incomingStudentId]: {
-                    ...existingStudent,           // Preserve all state (flags, etc.)
-                    clientId: incomingClientId,  // Update to new clientId for Ably delivery
-                    name: studentName,
-                    isActive: true,
-                    isVisible: member.data?.isVisible !== false,
-                    lastUpdate: Date.now(),
-                  }
-                };
+          setStudents(prev => {
+            // Check if student already exists (keyed by persistent studentId)
+            const existingStudent = prev[incomingStudentId];
+
+            if (existingStudent) {
+              // Student reconnected - update clientId and presence
+              console.log('🔄 Student reconnected:', existingStudent.clientId, '→', incomingClientId, '(', studentName, ')');
+
+              // Update selectedStudent if teacher has modal open with this student
+              if (selectedStudent?.studentId === incomingStudentId) {
+                setSelectedStudent({
+                  ...existingStudent,
+                  clientId: incomingClientId,
+                });
               }
 
-              // New student - show join toast only once per session
-              if (!joinedStudentsRef.current.has(incomingStudentId)) {
-                joinedStudentsRef.current.add(incomingStudentId);
-                showToast(`${studentName} joined`, 'success');
-              }
+              const updatedStudent = {
+                ...existingStudent,           // Preserve all state (flags, etc.)
+                clientId: incomingClientId,  // Update to new clientId for Ably delivery
+                name: studentName,
+                isActive: true,
+                isVisible: member.data?.isVisible !== false,
+                lastUpdate: Date.now(),
+              };
+
+              console.log('✅ Updated existing student:', updatedStudent);
 
               return {
                 ...prev,
-                [incomingStudentId]: {
-                  studentId: incomingStudentId,
-                  clientId: incomingClientId,
-                  name: studentName,
-                  isActive: true,
-                  isVisible: member.data?.isVisible !== false,
-                  lastUpdate: Date.now(),
-                  isFlagged: false,
-                }
+                [incomingStudentId]: updatedStudent
               };
+            }
+
+            // New student - show join toast only once per session
+            if (!joinedStudentsRef.current.has(incomingStudentId)) {
+              joinedStudentsRef.current.add(incomingStudentId);
+              showToast(`${studentName} joined`, 'success');
+            }
+
+            const newStudent = {
+              studentId: incomingStudentId,
+              clientId: incomingClientId,
+              name: studentName,
+              isActive: true,
+              isVisible: member.data?.isVisible !== false,
+              lastUpdate: Date.now(),
+              isFlagged: false,
+            };
+
+            console.log('✅ Added new student:', newStudent);
+            console.log('📊 Total students after add:', Object.keys(prev).length + 1);
+
+            return {
+              ...prev,
+              [incomingStudentId]: newStudent
+            };
+          });
+
+          // Send current shared image if exists
+          setTimeout(() => {
+            const annotations = teacherAnnotationsRef.current?.[incomingStudentId] || [];
+
+            whiteboardChannel.publish('sync-full-state', {
+              targetClientId: incomingClientId,
+              content: sharedImageRef.current || null,
+              annotations: annotations,
+              timestamp: Date.now(),
             });
 
-            // Send current shared image if exists
-            setTimeout(() => {
-              const annotations = teacherAnnotationsRef.current?.[incomingStudentId] || [];
-
-              whiteboardChannel.publish('sync-full-state', {
-                targetClientId: incomingClientId,
-                content: sharedImageRef.current || null,
-                annotations: annotations,
-                timestamp: Date.now(),
-              });
-
-              if (annotations.length > 0) {
-                console.log('📤 Sent', annotations.length, 'teacher annotations to', studentName);
-              }
-            }, 300);
-          }
+            if (annotations.length > 0) {
+              console.log('📤 Sent', annotations.length, 'teacher annotations to', studentName);
+            }
+          }, 300);
         });
 
         whiteboardChannel.presence.subscribe('leave', (member) => {
@@ -622,37 +646,57 @@ const TeacherDashboard = () => {
         // Load existing students who are already in the room
         const existingMembers = await whiteboardChannel.presence.get();
 
-        // MERGE presence with restored state (don't replace!)
-        const currentStudents = { ...students }; // Start with restored state
+        // Update students from presence (merge with existing state)
+        setStudents(prevStudents => {
+          const currentStudents = { ...prevStudents }; // Start with current state
 
-        // Update students from presence (merge, don't replace)
-        existingMembers.forEach(member => {
-          if (member.clientId !== clientId && member.clientId.includes('student')) {
-            const studentName = member.data?.name || extractStudentName(member.clientId);
-            const memberStudentId = member.data?.studentId;
+          console.log(`📥 Loading ${existingMembers.length} existing members from presence`);
 
-            if (!memberStudentId) {
-              console.warn('⚠️ Student in presence without studentId:', member.clientId);
+          existingMembers.forEach(member => {
+            // Skip teacher or invalid members
+            if (!member.clientId || member.clientId === clientId || !member.clientId.includes('student')) {
               return;
             }
 
-            const existingStudent = students[memberStudentId] || {};
+            const studentName = member.data?.name || extractStudentName(member.clientId);
+            const memberStudentId = member.data?.studentId;
+            const memberClientId = member.clientId;
+
+            if (!memberStudentId) {
+              console.warn('⚠️ Student in presence without studentId:', memberClientId);
+              return;
+            }
+
+            if (!memberClientId) {
+              console.warn('⚠️ Student in presence without clientId:', memberStudentId);
+              return;
+            }
+
+            const existingStudent = prevStudents[memberStudentId] || {};
 
             // Merge: Keep restored data (flags, etc.), update presence data (clientId, isActive, etc.)
             currentStudents[memberStudentId] = {
               ...existingStudent, // Keep all restored data (studentId, flags, etc.)
               studentId: memberStudentId,
-              clientId: member.clientId, // Update to current clientId
+              clientId: memberClientId, // Update to current clientId
               name: studentName,
               isActive: true,
               isVisible: member.data?.isVisible !== false,
               lastUpdate: Date.now(),
               isFlagged: existingStudent.isFlagged || false,
             };
-          }
-        });
 
-        setStudents(currentStudents);
+            // Track that this student has joined (prevent duplicate join toasts)
+            if (!joinedStudentsRef.current.has(memberStudentId)) {
+              joinedStudentsRef.current.add(memberStudentId);
+            }
+
+            console.log('✅ Loaded student from presence:', studentName, '| studentId:', memberStudentId, '| clientId:', memberClientId);
+          });
+
+          console.log(`📊 Total students in state after presence load: ${Object.keys(currentStudents).length}`);
+          return currentStudents;
+        });
 
         setChannel(whiteboardChannel);
       } catch (error) {
