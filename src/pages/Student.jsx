@@ -257,17 +257,18 @@ function Student() {
       const timer = setTimeout(() => {
         channel.publish('student-layer', {
           lines: studentLines,
-          clientId,
+          studentId,          // Persistent ID (primary key)
+          clientId,           // Volatile ID (backward compatibility)
           meta: {
             display: canvasSize,
             scale: canvasScale,
           },
         });
-        console.log('📤 Published student layer:', studentLines.length, 'lines');
+        console.log('📤 Published student layer:', studentLines.length, 'lines (studentId:', studentId, ')');
       }, 150);
       return () => clearTimeout(timer);
     }
-  }, [studentLines, channel, clientId, canvasSize, canvasScale]);
+  }, [studentLines, channel, clientId, studentId, canvasSize, canvasScale]);
 
   // Cleanup animation frame on unmount
   useEffect(() => {

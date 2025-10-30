@@ -567,17 +567,24 @@ const TeacherDashboard = () => {
 
         // Listen for student drawing updates
         whiteboardChannel.subscribe('student-layer', (message) => {
-          const { lines, clientId: studentClientId } = message.data;
+          const { lines, studentId, clientId: studentClientId } = message.data;
 
-          // Find the student by clientId
+          // Use persistent studentId (direct O(1) lookup) or fallback to clientId search
           setStudents(prev => {
-            const studentId = Object.keys(prev).find(id => prev[id].clientId === studentClientId);
-            if (!studentId) return prev;
+            const lookupId = studentId || Object.keys(prev).find(id => prev[id].clientId === studentClientId);
+
+            if (!lookupId) {
+              console.warn('⚠️ Student not found for stroke update. studentId:', studentId, 'clientId:', studentClientId);
+              console.warn('Available students:', Object.keys(prev));
+              return prev;
+            }
+
+            console.log('✅ Updating student', lookupId, 'with', (lines || []).length, 'lines');
 
             return {
               ...prev,
-              [studentId]: {
-                ...prev[studentId],
+              [lookupId]: {
+                ...prev[lookupId],
                 lines: lines || [],
               }
             };
