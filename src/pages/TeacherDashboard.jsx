@@ -804,64 +804,74 @@ const TeacherDashboard = () => {
 
         setChannel(whiteboardChannel);
 
-        // Load strokes from Redis after connection (for page refresh recovery)
-        setTimeout(async () => {
-          try {
-            console.log('📥 Loading strokes from Redis...');
-            const response = await fetch(`/api/strokes/load?roomId=${roomId}`);
-            
-            if (response.ok) {
-              const data = await response.json();
+        // Load strokes from Redis ONLY on page refresh (not on normal navigation)
+        // Check if this is a page refresh using performance API
+        const isPageRefresh = performance.navigation.type === 1 || 
+                             performance.getEntriesByType('navigation')[0]?.type === 'reload';
+        
+        if (isPageRefresh) {
+          setTimeout(async () => {
+            try {
+              console.log('🔄 Page refresh detected - loading strokes from Redis...');
+              const response = await fetch(`/api/strokes/load?roomId=${roomId}`);
               
-              if (data.students && Object.keys(data.students).length > 0) {
-                console.log(`✅ Loaded ${Object.keys(data.students).length} students' data from Redis`);
+              if (response.ok) {
+                const data = await response.json();
                 
-                // Merge Redis data with current state
-                setStudents(prev => {
-                  const updated = { ...prev };
+                if (data.students && Object.keys(data.students).length > 0) {
+                  console.log(`✅ Restored ${Object.keys(data.students).length} students' data from Redis after refresh`);
                   
-                  Object.entries(data.students).forEach(([studentId, redisData]) => {
-                    if (updated[studentId]) {
-                      // Student exists, merge the lines
-                      updated[studentId] = {
-                        ...updated[studentId],
-                        lines: redisData.lines || [],
-                      };
-                    } else {
-                      // Student doesn't exist yet (they might have disconnected)
-                      // Store their data for when they reconnect
-                      updated[studentId] = {
-                        studentId,
-                        clientId: undefined, // Will be filled when they reconnect
-                        name: redisData.meta?.name || 'Unknown',
-                        lines: redisData.lines || [],
-                        isActive: false,
-                        lastUpdate: Date.now(),
-                      };
-                    }
+                  // Merge Redis data with current state
+                  setStudents(prev => {
+                    const updated = { ...prev };
+                    
+                    Object.entries(data.students).forEach(([studentId, redisData]) => {
+                      if (updated[studentId]) {
+                        // Student exists, merge the lines
+                        updated[studentId] = {
+                          ...updated[studentId],
+                          lines: redisData.lines || [],
+                        };
+                      } else {
+                        // Student doesn't exist yet (they might have disconnected)
+                        // Store their data for when they reconnect
+                        updated[studentId] = {
+                          studentId,
+                          clientId: undefined, // Will be filled when they reconnect
+                          name: redisData.meta?.name || 'Unknown',
+                          lines: redisData.lines || [],
+                          isActive: false,
+                          lastUpdate: Date.now(),
+                        };
+                      }
+                    });
+                    
+                    return updated;
                   });
-                  
-                  return updated;
-                });
 
-                // Load teacher annotations
-                setTeacherAnnotations(prev => {
-                  const updated = { ...prev };
-                  
-                  Object.entries(data.students).forEach(([studentId, redisData]) => {
-                    if (redisData.annotations && redisData.annotations.length > 0) {
-                      updated[studentId] = redisData.annotations;
-                    }
+                  // Load teacher annotations
+                  setTeacherAnnotations(prev => {
+                    const updated = { ...prev };
+                    
+                    Object.entries(data.students).forEach(([studentId, redisData]) => {
+                      if (redisData.annotations && redisData.annotations.length > 0) {
+                        updated[studentId] = redisData.annotations;
+                      }
+                    });
+                    
+                    return updated;
                   });
-                  
-                  return updated;
-                });
+                } else {
+                  console.log('ℹ️ No cached data found in Redis (fresh session or cache expired)');
+                }
               }
+            } catch (error) {
+              console.error('Error loading strokes from Redis:', error);
             }
-          } catch (error) {
-            console.error('Error loading strokes from Redis:', error);
-          }
-        }, 1000); // Small delay to ensure channel is fully set up
+          }, 1000); // Small delay to ensure channel is fully set up
+        } else {
+          console.log('ℹ️ Normal page load - skipping Redis restore');
+        }
       } catch (error) {
         console.error('Failed to connect to Ably:', error);
       }

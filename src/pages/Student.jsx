@@ -611,32 +611,41 @@ function Student() {
           });
         }, 500);
 
-        // Load own strokes from Redis (for page refresh recovery)
-        setTimeout(async () => {
-          if (!isActive) return;
-          
-          try {
-            console.log('📥 Loading own strokes from Redis...');
-            const response = await fetch(`/api/strokes/load?roomId=${roomId}&studentId=${studentId}`);
+        // Load own strokes from Redis ONLY on page refresh (not on normal navigation)
+        const isPageRefresh = performance.navigation.type === 1 || 
+                             performance.getEntriesByType('navigation')[0]?.type === 'reload';
+        
+        if (isPageRefresh) {
+          setTimeout(async () => {
+            if (!isActive) return;
             
-            if (response.ok) {
-              const data = await response.json();
+            try {
+              console.log('🔄 Page refresh detected - loading own strokes from Redis...');
+              const response = await fetch(`/api/strokes/load?roomId=${roomId}&studentId=${studentId}`);
               
-              if (data.lines && data.lines.length > 0) {
-                console.log(`✅ Restored ${data.lines.length} lines from Redis`);
+              if (response.ok) {
+                const data = await response.json();
                 
-                isRemoteUpdate.current = true;
-                setStudentLines(data.lines);
-                
-                setTimeout(() => {
-                  isRemoteUpdate.current = false;
-                }, 100);
+                if (data.lines && data.lines.length > 0) {
+                  console.log(`✅ Restored ${data.lines.length} lines from Redis after refresh`);
+                  
+                  isRemoteUpdate.current = true;
+                  setStudentLines(data.lines);
+                  
+                  setTimeout(() => {
+                    isRemoteUpdate.current = false;
+                  }, 100);
+                } else {
+                  console.log('ℹ️ No cached strokes found in Redis');
+                }
               }
+            } catch (error) {
+              console.error('Error loading strokes from Redis:', error);
             }
-          } catch (error) {
-            console.error('Error loading strokes from Redis:', error);
-          }
-        }, 700); // Slightly after requesting current state
+          }, 700); // Slightly after requesting current state
+        } else {
+          console.log('ℹ️ Normal page load - skipping Redis restore');
+        }
       } catch (error) {
         console.error('Failed to initialize Ably:', error);
       }
