@@ -459,8 +459,10 @@ function Student() {
 
     const initAbly = async () => {
       try {
-        // Initialize IndexedDB first
+        // 0) Page loads - initialise indexdb
+        console.log('0️⃣ Page loads - Initializing IndexedDB...');
         await initDB();
+        console.log('✅ IndexedDB initialized successfully');
 
         ablyClient = new Ably.Realtime({
           authUrl: '/api/token',
@@ -631,25 +633,31 @@ function Student() {
         }, 500);
 
         // Load strokes ONLY on page refresh (IndexedDB for own, Redis for teacher annotations)
-        const isPageRefresh = performance.navigation.type === 1 || 
+        const isPageRefresh = performance.navigation.type === 1 ||
                              performance.getEntriesByType('navigation')[0]?.type === 'reload';
-        
+
         if (isPageRefresh) {
           setTimeout(async () => {
             if (!isActive) return;
-            
-            try {
-              console.log('🔄 Page refresh detected - loading from IndexedDB + Redis...');
 
-              // Load student's own strokes from IndexedDB
+            try {
+              // 2) When i reload the page, initialise index db
+              console.log('2️⃣ Page refresh detected - Re-initializing IndexedDB...');
+              await initDB();
+              console.log('✅ IndexedDB re-initialized on reload');
+
+              // 3) indexDB strokes loaded
+              console.log('3️⃣ Loading strokes from IndexedDB...');
               const ownStrokes = await loadStrokesFromIndexedDB(roomId, studentId, 'student');
               if (ownStrokes && ownStrokes.length > 0) {
-                console.log(`✅ Loaded ${ownStrokes.length} own strokes from IndexedDB`);
+                console.log(`✅ IndexedDB strokes loaded: ${ownStrokes.length} strokes`);
                 isRemoteUpdate.current = true;
                 setStudentLines(ownStrokes);
                 setTimeout(() => {
                   isRemoteUpdate.current = false;
                 }, 100);
+              } else {
+                console.log('ℹ️ No strokes found in IndexedDB');
               }
 
               // Load teacher annotations from Redis (specific to this student)
@@ -946,10 +954,12 @@ function Student() {
       const strokeToSave = currentLineRef.current;
       setTimeout(async () => {
         try {
+          // 1) When i draw a stroke, store in indexdb
+          console.log('1️⃣ Drawing finished - Storing stroke in IndexedDB...');
           await saveStrokeToIndexedDB(strokeToSave, roomId, studentId, 'student');
-          console.log('💾 Saved stroke to IndexedDB:', strokeToSave.strokeId);
+          console.log('✅ Stroke saved to IndexedDB:', strokeToSave.strokeId);
         } catch (error) {
-          console.error('Error saving stroke to IndexedDB:', error);
+          console.error('❌ Error saving stroke to IndexedDB:', error);
         }
       }, 150);
     }

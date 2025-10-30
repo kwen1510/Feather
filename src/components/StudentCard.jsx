@@ -79,7 +79,7 @@ const StudentCard = ({ student, onClick, onToggleFlag, teacherAnnotations = [], 
   const handleFlagToggle = (event) => {
     event.stopPropagation();
     if (onToggleFlag) {
-      onToggleFlag(student.clientId);
+      onToggleFlag(student.studentId);
     }
   };
 
