@@ -5,7 +5,7 @@ import * as Ably from 'ably';
 import { supabase } from '../supabaseClient';
 import { Pen, Eraser, Undo, Redo, Trash2 } from 'lucide-react';
 import { getOrCreateStudentId } from '../utils/identity';
-import { saveStroke as saveStrokeToIndexedDB, loadStrokes as loadStrokesFromIndexedDB, clearStrokes as clearStrokesFromIndexedDB } from '../utils/indexedDB';
+import { initDB, saveStroke as saveStrokeToIndexedDB, loadStrokes as loadStrokesFromIndexedDB, clearStrokes as clearStrokesFromIndexedDB } from '../utils/indexedDB';
 import './StudentNew.css';
 
 // Generate unique stroke ID
@@ -459,6 +459,9 @@ function Student() {
 
     const initAbly = async () => {
       try {
+        // Initialize IndexedDB first
+        await initDB();
+
         ablyClient = new Ably.Realtime({
           authUrl: '/api/token',
           authParams: { clientId },
@@ -580,7 +583,7 @@ function Student() {
           }, 100);
 
           // Clear IndexedDB for student's own strokes
-          clearStrokesFromIndexedDB().then(() => {
+          clearStrokesFromIndexedDB(roomId, studentId, 'student').then(() => {
             console.log('🗑️ Cleared student strokes from IndexedDB');
           }).catch(error => {
             console.error('Error clearing IndexedDB:', error);
@@ -637,9 +640,9 @@ function Student() {
             
             try {
               console.log('🔄 Page refresh detected - loading from IndexedDB + Redis...');
-              
+
               // Load student's own strokes from IndexedDB
-              const ownStrokes = await loadStrokesFromIndexedDB();
+              const ownStrokes = await loadStrokesFromIndexedDB(roomId, studentId, 'student');
               if (ownStrokes && ownStrokes.length > 0) {
                 console.log(`✅ Loaded ${ownStrokes.length} own strokes from IndexedDB`);
                 isRemoteUpdate.current = true;
@@ -943,7 +946,8 @@ function Student() {
       const strokeToSave = currentLineRef.current;
       setTimeout(async () => {
         try {
-          await saveStrokeToIndexedDB(strokeToSave);
+          await saveStrokeToIndexedDB(strokeToSave, roomId, studentId, 'student');
+          console.log('💾 Saved stroke to IndexedDB:', strokeToSave.strokeId);
         } catch (error) {
           console.error('Error saving stroke to IndexedDB:', error);
         }
