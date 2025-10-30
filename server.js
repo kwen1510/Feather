@@ -304,31 +304,53 @@ const server = createServer(async (req, res) => {
       }
 
       // If no studentId, load all students' data for this room (for teacher)
+      // Use scan instead of keys for better Upstash compatibility
       const pattern = `room:${roomId}:student:*:lines`;
-      const keys = await redis.keys(pattern);
+      let keys = [];
+      
+      try {
+        const scanResult = await redis.keys(pattern);
+        // Upstash returns array directly
+        keys = Array.isArray(scanResult) ? scanResult : [];
+      } catch (scanError) {
+        console.warn('Redis keys scan failed, trying alternative:', scanError.message);
+        // If keys fails, return empty (no cached data)
+        keys = [];
+      }
       
       const studentsData = {};
-      for (const key of keys) {
-        // Extract studentId from key: room:roomId:student:studentId:lines
-        const parts = key.split(':');
-        const sid = parts[3];
-        
-        const linesKey = getStudentLinesKey(roomId, sid);
-        const annotationsKey = getTeacherAnnotationsKey(roomId, sid);
-        const metaKey = `room:${roomId}:student:${sid}:meta`;
+      
+      if (keys.length > 0) {
+        for (const key of keys) {
+          // Extract studentId from key: room:roomId:student:studentId:lines
+          const parts = key.split(':');
+          if (parts.length < 4) continue; // Skip invalid keys
+          
+          const sid = parts[3];
+          
+          const linesKey = getStudentLinesKey(roomId, sid);
+          const annotationsKey = getTeacherAnnotationsKey(roomId, sid);
+          const metaKey = `room:${roomId}:student:${sid}:meta`;
 
-        const [lines, annotations, meta] = await Promise.all([
-          redis.get(linesKey),
-          redis.get(annotationsKey),
-          redis.get(metaKey)
-        ]);
+          try {
+            const [lines, annotations, meta] = await Promise.all([
+              redis.get(linesKey),
+              redis.get(annotationsKey),
+              redis.get(metaKey)
+            ]);
 
-        studentsData[sid] = {
-          studentId: sid,
-          lines: lines ? JSON.parse(lines) : [],
-          annotations: annotations ? JSON.parse(annotations) : [],
-          meta: meta ? JSON.parse(meta) : {}
-        };
+            studentsData[sid] = {
+              studentId: sid,
+              lines: lines ? (typeof lines === 'string' ? JSON.parse(lines) : lines) : [],
+              annotations: annotations ? (typeof annotations === 'string' ? JSON.parse(annotations) : annotations) : [],
+              meta: meta ? (typeof meta === 'string' ? JSON.parse(meta) : meta) : {}
+            };
+          } catch (parseError) {
+            console.error(`Error loading data for student ${sid}:`, parseError.message);
+            // Skip this student if data is corrupted
+            continue;
+          }
+        }
       }
 
       res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -360,26 +382,45 @@ const server = createServer(async (req, res) => {
 
       // Step 2: Load all student data from Redis
       const pattern = `room:${roomId}:student:*:lines`;
-      const keys = await redis.keys(pattern);
+      let keys = [];
+      
+      try {
+        const scanResult = await redis.keys(pattern);
+        keys = Array.isArray(scanResult) ? scanResult : [];
+      } catch (scanError) {
+        console.warn('Redis keys scan failed:', scanError.message);
+        keys = [];
+      }
       
       let savedCount = 0;
       for (const key of keys) {
         const parts = key.split(':');
+        if (parts.length < 4) continue;
+        
         const studentId = parts[3];
         
         const linesKey = getStudentLinesKey(roomId, studentId);
         const annotationsKey = getTeacherAnnotationsKey(roomId, studentId);
         const metaKey = `room:${roomId}:student:${studentId}:meta`;
 
-        const [lines, annotations, meta] = await Promise.all([
-          redis.get(linesKey),
-          redis.get(annotationsKey),
-          redis.get(metaKey)
-        ]);
+        let studentLines = [];
+        let teacherAnnotations = [];
+        let studentMeta = {};
 
-        const studentLines = lines ? JSON.parse(lines) : [];
-        const teacherAnnotations = annotations ? JSON.parse(annotations) : [];
-        const studentMeta = meta ? JSON.parse(meta) : {};
+        try {
+          const [lines, annotations, meta] = await Promise.all([
+            redis.get(linesKey),
+            redis.get(annotationsKey),
+            redis.get(metaKey)
+          ]);
+
+          studentLines = lines ? (typeof lines === 'string' ? JSON.parse(lines) : lines) : [];
+          teacherAnnotations = annotations ? (typeof annotations === 'string' ? JSON.parse(annotations) : annotations) : [];
+          studentMeta = meta ? (typeof meta === 'string' ? JSON.parse(meta) : meta) : {};
+        } catch (parseError) {
+          console.error(`Error parsing data for student ${studentId}:`, parseError.message);
+          continue;
+        }
 
         // Only save if there's actual content
         if (studentLines.length > 0 || teacherAnnotations.length > 0) {
@@ -442,10 +483,16 @@ const server = createServer(async (req, res) => {
 
       let deletedCount = 0;
       for (const pattern of patterns) {
-        const keys = await redis.keys(pattern);
-        for (const key of keys) {
-          await redis.del(key);
-          deletedCount++;
+        try {
+          const scanResult = await redis.keys(pattern);
+          const keys = Array.isArray(scanResult) ? scanResult : [];
+          
+          for (const key of keys) {
+            await redis.del(key);
+            deletedCount++;
+          }
+        } catch (error) {
+          console.warn(`Failed to clear pattern ${pattern}:`, error.message);
         }
       }
 
