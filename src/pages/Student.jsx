@@ -386,9 +386,9 @@ function Student() {
     };
   }, [roomId, clientId, studentName, navigate]);
 
-  // Initialize Ably connection
+  // Initialize Ably connection - wait for studentId to be ready
   useEffect(() => {
-    if (!roomId || !studentName || !clientId) {
+    if (!roomId || !studentName || !clientId || !studentId) {
       return;
     }
 
