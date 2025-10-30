@@ -460,7 +460,7 @@ const AnnotationModal = ({
   };
 
   const handleFlagToggle = () => {
-    if (onToggleFlag) onToggleFlag(student.clientId);
+    if (onToggleFlag) onToggleFlag(student.studentId);
   };
 
   const handleClose = () => {
