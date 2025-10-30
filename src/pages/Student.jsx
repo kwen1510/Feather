@@ -93,7 +93,7 @@ function Student() {
 
   const clientIdentityRef = useRef({ roomId: null, studentName: null, clientId: null });
   const [clientId, setClientId] = useState(null);
-  const [studentId, setStudentId] = useState(null); // Persistent identity across refreshes
+  const [studentId] = useState(() => getOrCreateStudentId()); // Initialize synchronously on first render
 
   const [isConnected, setIsConnected] = useState(false);
 
@@ -149,12 +149,6 @@ function Student() {
     clientIdentityRef.current = { roomId, studentName, clientId: generatedClientId };
     setClientId(generatedClientId);
   }, [studentName, roomId]);
-
-  // Initialize persistent studentId
-  useEffect(() => {
-    const id = getOrCreateStudentId();
-    setStudentId(id);
-  }, []);
 
   // Load saved preferences only when we have valid room and name
   useEffect(() => {
