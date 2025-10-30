@@ -649,20 +649,22 @@ function Student() {
                 }, 100);
               }
 
-              // Load teacher annotations from Redis
+              // Load teacher annotations from Redis (specific to this student)
               const response = await fetch(`/api/strokes/load?roomId=${roomId}&party=teacher`);
               if (response.ok) {
                 const data = await response.json();
-                if (data.strokes && data.strokes.length > 0) {
-                  console.log(`✅ Loaded ${data.strokes.length} teacher annotations from Redis`);
+                // Extract annotations for this specific student
+                const myAnnotations = data.annotations?.[studentId] || [];
+                if (myAnnotations.length > 0) {
+                  console.log(`✅ Loaded ${myAnnotations.length} teacher annotations for this student from Redis`);
                   // Set teacher annotations from Redis
                   isRemoteUpdate.current = true;
-                  setTeacherAnnotations(data.strokes);
+                  setTeacherLines(myAnnotations);
                   setTimeout(() => {
                     isRemoteUpdate.current = false;
                   }, 100);
                 } else {
-                  console.log('ℹ️ No teacher annotations found in Redis');
+                  console.log('ℹ️ No teacher annotations found for this student in Redis');
                 }
               }
             } catch (error) {

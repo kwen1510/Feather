@@ -242,28 +242,35 @@ const TeacherDashboard = () => {
           }
         }
 
-        // Save new teacher annotation strokes (across all students)
-        const allTeacherAnnotations = Object.values(teacherAnnotations).flat();
+        // Save new teacher annotation strokes (grouped by studentId for proper restoration)
         const lastSavedTeacherIds = lastSavedStrokesRef.current.teacher || new Set();
-        const newTeacherStrokes = allTeacherAnnotations.filter(
-          ann => ann.strokeId && !lastSavedTeacherIds.has(ann.strokeId)
-        );
+        const newAnnotationsByStudent = {};
 
-        if (newTeacherStrokes.length > 0) {
+        Object.entries(teacherAnnotations).forEach(([studentId, annotations]) => {
+          const newStrokes = annotations.filter(
+            ann => ann.strokeId && !lastSavedTeacherIds.has(ann.strokeId)
+          );
+          if (newStrokes.length > 0) {
+            newAnnotationsByStudent[studentId] = newStrokes;
+          }
+        });
+
+        if (Object.keys(newAnnotationsByStudent).length > 0) {
           await fetch('/api/strokes/save', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               roomId,
               party: 'teacher',
-              strokes: newTeacherStrokes,
+              annotations: newAnnotationsByStudent, // Send grouped structure
             }),
           });
 
           // Mark strokes as saved
-          newTeacherStrokes.forEach(stroke => lastSavedTeacherIds.add(stroke.strokeId));
+          Object.values(newAnnotationsByStudent).flat().forEach(stroke => lastSavedTeacherIds.add(stroke.strokeId));
           lastSavedStrokesRef.current.teacher = lastSavedTeacherIds;
-          console.log(`💾 Saved ${newTeacherStrokes.length} new teacher annotation strokes`);
+          const totalStrokes = Object.values(newAnnotationsByStudent).flat().length;
+          console.log(`💾 Saved ${totalStrokes} new teacher annotation strokes for ${Object.keys(newAnnotationsByStudent).length} students`);
         }
       } catch (error) {
         console.error('Error auto-saving to Redis:', error);
@@ -831,18 +838,17 @@ const TeacherDashboard = () => {
             try {
               console.log('🔄 Page refresh detected - loading from IndexedDB + Redis...');
               
-              // Load teacher's own annotations from IndexedDB
-              const teacherStrokes = await loadStrokesFromIndexedDB();
-              if (teacherStrokes && teacherStrokes.length > 0) {
-                console.log(`✅ Loaded ${teacherStrokes.length} teacher annotations from IndexedDB`);
-                // Group teacher strokes by studentId if they have that property
-                const groupedAnnotations = {};
-                teacherStrokes.forEach(stroke => {
-                  // Note: We'll need to track which student each annotation belongs to
-                  // For now, we'll load all teacher annotations into a temp structure
-                  // and distribute them once we know the students
-                });
-                // TODO: Properly associate teacher annotations with students
+              // Load teacher annotations from Redis (grouped by studentId)
+              const teacherResponse = await fetch(`/api/strokes/load?roomId=${roomId}&party=teacher`);
+              if (teacherResponse.ok) {
+                const teacherData = await teacherResponse.json();
+                if (teacherData.annotations && Object.keys(teacherData.annotations).length > 0) {
+                  console.log(`✅ Loaded teacher annotations for ${Object.keys(teacherData.annotations).length} students from Redis`);
+                  // Restore the grouped structure
+                  setTeacherAnnotations(teacherData.annotations);
+                } else {
+                  console.log('ℹ️ No teacher annotations found in Redis');
+                }
               }
 
               // Load all students' strokes from Redis
@@ -882,19 +888,6 @@ const TeacherDashboard = () => {
                   });
                 } else {
                   console.log('ℹ️ No student data found in Redis');
-                }
-              }
-
-              // Load teacher annotations from Redis (all teacher strokes)
-              const teacherResponse = await fetch(`/api/strokes/load?roomId=${roomId}&party=teacher`);
-              if (teacherResponse.ok) {
-                const teacherData = await teacherResponse.json();
-                if (teacherData.strokes && teacherData.strokes.length > 0) {
-                  console.log(`✅ Loaded ${teacherData.strokes.length} teacher annotations from Redis`);
-                  // Note: Teacher annotations in Redis don't have studentId association
-                  // We'll need to rethink how to store which student each annotation belongs to
-                  // For now, skip loading teacher annotations from Redis
-                  // and rely on IndexedDB + re-annotation
                 }
               }
             } catch (error) {

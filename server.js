@@ -195,16 +195,24 @@ function getStudentStrokesPattern(roomId, studentId) {
 
 /**
  * Get Redis key for an individual teacher annotation stroke
+ * Includes studentId to associate annotation with specific student
  */
-function getTeacherStrokeKey(roomId, strokeId) {
-  return `room:${roomId}:teacher:stroke:${strokeId}`;
+function getTeacherStrokeKey(roomId, studentId, strokeId) {
+  return `room:${roomId}:teacher:${studentId}:stroke:${strokeId}`;
 }
 
 /**
- * Get Redis key pattern for all teacher strokes
+ * Get Redis key pattern for all teacher strokes (all students)
  */
 function getTeacherStrokesPattern(roomId) {
-  return `room:${roomId}:teacher:stroke:*`;
+  return `room:${roomId}:teacher:*:stroke:*`;
+}
+
+/**
+ * Get Redis key pattern for teacher strokes for specific student
+ */
+function getTeacherStrokesPatternForStudent(roomId, studentId) {
+  return `room:${roomId}:teacher:${studentId}:stroke:*`;
 }
 
 /**
@@ -249,47 +257,64 @@ const server = createServer(async (req, res) => {
   if (req.url === '/api/strokes/save' && req.method === 'POST') {
     try {
       const body = await parseBody(req);
-      const { roomId, strokes, party, studentId, studentName } = body;
-      
-      // party: 'student' or 'teacher'
-      // strokes: array of stroke objects, each with strokeId
+      const { roomId, strokes, party, studentId, studentName, annotations } = body;
 
-      if (!roomId || !party || !strokes) {
+      // party: 'student' or 'teacher'
+      // strokes: array of stroke objects (for students), each with strokeId
+      // annotations: object keyed by studentId (for teacher), each value is array of strokes
+
+      if (!roomId || !party) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'Missing required fields: roomId, party, strokes' }));
+        res.end(JSON.stringify({ error: 'Missing required fields: roomId, party' }));
         return;
       }
 
-      if (party === 'student' && !studentId) {
+      if (party === 'student' && (!studentId || !strokes)) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'Missing studentId for student party' }));
+        res.end(JSON.stringify({ error: 'Missing studentId or strokes for student party' }));
+        return;
+      }
+
+      if (party === 'teacher' && !annotations) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Missing annotations for teacher party' }));
         return;
       }
 
       let savedCount = 0;
 
-      // Save each stroke individually
-      for (const stroke of strokes) {
-        if (!stroke.strokeId) {
-          console.warn('Stroke missing strokeId, skipping');
-          continue;
+      if (party === 'teacher') {
+        // Save teacher annotations grouped by studentId
+        for (const [targetStudentId, annotationStrokes] of Object.entries(annotations)) {
+          for (const stroke of annotationStrokes) {
+            if (!stroke.strokeId) {
+              console.warn('Annotation missing strokeId, skipping');
+              continue;
+            }
+
+            const key = getTeacherStrokeKey(roomId, targetStudentId, stroke.strokeId);
+            await redis.set(key, JSON.stringify(stroke), { ex: 86400 }); // 24 hour expiry
+            savedCount++;
+          }
+        }
+      } else {
+        // Save student strokes
+        for (const stroke of strokes) {
+          if (!stroke.strokeId) {
+            console.warn('Stroke missing strokeId, skipping');
+            continue;
+          }
+
+          const key = getStudentStrokeKey(roomId, studentId, stroke.strokeId);
+          await redis.set(key, JSON.stringify(stroke), { ex: 86400 }); // 24 hour expiry
+          savedCount++;
         }
 
-        let key;
-        if (party === 'teacher') {
-          key = getTeacherStrokeKey(roomId, stroke.strokeId);
-        } else {
-          key = getStudentStrokeKey(roomId, studentId, stroke.strokeId);
+        // Save student metadata (name) for later reference
+        if (studentName) {
+          const metaKey = getStudentMetaKey(roomId, studentId);
+          await redis.set(metaKey, JSON.stringify({ name: studentName }), { ex: 86400 });
         }
-
-        await redis.set(key, JSON.stringify(stroke), { ex: 86400 }); // 24 hour expiry
-        savedCount++;
-      }
-
-      // Save student metadata (name) for later reference
-      if (party === 'student' && studentName) {
-        const metaKey = getStudentMetaKey(roomId, studentId);
-        await redis.set(metaKey, JSON.stringify({ name: studentName }), { ex: 86400 });
       }
 
       res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -317,10 +342,10 @@ const server = createServer(async (req, res) => {
       }
 
       if (party === 'teacher') {
-        // Load all teacher annotation strokes
+        // Load all teacher annotation strokes grouped by studentId
         const pattern = getTeacherStrokesPattern(roomId);
         let keys = [];
-        
+
         try {
           const scanResult = await redis.keys(pattern);
           keys = Array.isArray(scanResult) ? scanResult : [];
@@ -329,13 +354,23 @@ const server = createServer(async (req, res) => {
           keys = [];
         }
 
-        const strokes = [];
+        // Group annotations by studentId
+        // Key format: room:{roomId}:teacher:{studentId}:stroke:{strokeId}
+        const annotations = {};
         for (const key of keys) {
           try {
+            // Extract studentId from key
+            const parts = key.split(':');
+            const studentId = parts[3]; // room:{roomId}:teacher:{studentId}:stroke:{strokeId}
+
             const strokeData = await redis.get(key);
             if (strokeData) {
               const stroke = typeof strokeData === 'string' ? JSON.parse(strokeData) : strokeData;
-              strokes.push(stroke);
+
+              if (!annotations[studentId]) {
+                annotations[studentId] = [];
+              }
+              annotations[studentId].push(stroke);
             }
           } catch (parseError) {
             console.error(`Error parsing stroke from key ${key}:`, parseError.message);
@@ -343,7 +378,7 @@ const server = createServer(async (req, res) => {
         }
 
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ party: 'teacher', strokes }));
+        res.end(JSON.stringify({ party: 'teacher', annotations }));
         return;
       }
 
@@ -579,7 +614,7 @@ const server = createServer(async (req, res) => {
       const patterns = [
         `room:${roomId}:student:*:stroke:*`,  // All student strokes
         `room:${roomId}:student:*:meta`,       // Student metadata
-        `room:${roomId}:teacher:stroke:*`      // All teacher strokes
+        `room:${roomId}:teacher:*:stroke:*`    // All teacher strokes (grouped by studentId)
       ];
 
       let deletedCount = 0;
