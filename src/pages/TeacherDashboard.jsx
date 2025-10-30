@@ -1837,7 +1837,7 @@ const TeacherDashboard = () => {
                 }}
               >
                 {filteredStudents
-                  .filter(student => student && student.studentId && student.clientId)
+                  .filter(student => student && student.studentId)
                   .map(student => (
                     <StudentCard
                       key={student.studentId}
