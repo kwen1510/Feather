@@ -459,7 +459,11 @@ const TeacherDashboard = () => {
             // Check if student already exists (keyed by persistent studentId)
             const existingStudent = prev[incomingStudentId];
 
-            if (existingStudent) {
+            // If student exists AND has a valid clientId, treat as reconnection
+            // If student exists but has undefined/null clientId, treat as new (fix for race condition)
+            const isReconnection = existingStudent && existingStudent.clientId;
+
+            if (isReconnection) {
               // Student reconnected - update clientId and presence
               console.log('🔄 Student reconnected:', existingStudent.clientId, '→', incomingClientId, '(', studentName, ')');
 
@@ -489,9 +493,15 @@ const TeacherDashboard = () => {
             }
 
             // New student - show join toast only once per session
-            if (!joinedStudentsRef.current.has(incomingStudentId)) {
+            // (Also handles case where student exists but has undefined clientId due to race condition)
+            const isFirstJoin = !joinedStudentsRef.current.has(incomingStudentId);
+            
+            if (isFirstJoin) {
               joinedStudentsRef.current.add(incomingStudentId);
               showToast(`${studentName} joined`, 'success');
+            } else if (existingStudent && !existingStudent.clientId) {
+              // Student existed with undefined clientId - log this anomaly
+              console.warn('⚠️ Fixed student with undefined clientId:', incomingStudentId);
             }
 
             const newStudent = {
@@ -501,10 +511,10 @@ const TeacherDashboard = () => {
               isActive: true,
               isVisible: member.data?.isVisible !== false,
               lastUpdate: Date.now(),
-              isFlagged: false,
+              isFlagged: existingStudent?.isFlagged || false, // Preserve flag if exists
             };
 
-            console.log('✅ Added new student:', newStudent);
+            console.log(isFirstJoin ? '✅ Added new student:' : '✅ Initialized student with clientId:', newStudent);
             console.log('📊 Total students after add:', Object.keys(prev).length + 1);
 
             return {
