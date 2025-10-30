@@ -7,7 +7,11 @@ import StudentCard from '../components/StudentCard';
 import AnnotationModal from '../components/AnnotationModal';
 import { resizeAndCompressImage } from '../utils/imageUtils';
 import { supabase } from '../supabaseClient';
+import { saveStroke as saveStrokeToIndexedDB, loadStrokes as loadStrokesFromIndexedDB, clearStrokes as clearStrokesFromIndexedDB } from '../utils/indexedDB';
 import './TeacherDashboard.css';
+
+// Generate unique stroke ID
+const generateStrokeId = () => `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
 const TeacherDashboard = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -194,11 +198,11 @@ const TeacherDashboard = () => {
     }
   }, [sessionId, sessionStatus, channel, currentQuestionNumber, roomId, sharedImage]);
 
-  // Track last saved state to avoid unnecessary Redis writes
-  const lastSavedRef = useRef({});
+  // Track last saved strokes to avoid unnecessary Redis writes
+  const lastSavedStrokesRef = useRef({ students: {}, teacher: {} });
   const saveTimerRef = useRef(null);
 
-  // Auto-save strokes to Redis (debounced for performance, only saves changed data)
+  // Auto-save strokes to Redis (debounced, only saves new strokes since last save)
   useEffect(() => {
     if (!roomId || !sessionId || currentQuestionNumber === 0) return;
 
@@ -209,48 +213,62 @@ const TeacherDashboard = () => {
 
     saveTimerRef.current = setTimeout(async () => {
       try {
-        const savePromises = [];
-
-        // Only save students whose data has changed
-        Object.entries(students).forEach(([studentId, student]) => {
+        // Save new student strokes
+        for (const [studentId, student] of Object.entries(students)) {
           const lines = student.lines || [];
-          const annotations = teacherAnnotations[studentId] || [];
-          
-          // Skip if no data
-          if (lines.length === 0 && annotations.length === 0) return;
+          if (lines.length === 0) continue;
 
-          // Create a hash of the current data to compare
-          const currentHash = JSON.stringify({ lines, annotations });
-          const lastHash = lastSavedRef.current[studentId];
+          // Find strokes not yet saved
+          const lastSavedIds = lastSavedStrokesRef.current.students[studentId] || new Set();
+          const newStrokes = lines.filter(line => line.strokeId && !lastSavedIds.has(line.strokeId));
 
-          // Only save if data changed
-          if (currentHash !== lastHash) {
-            lastSavedRef.current[studentId] = currentHash;
-            
-            savePromises.push(
-              fetch('/api/strokes/save', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  roomId,
-                  studentId,
-                  lines,
-                  annotations,
-                  studentName: student.name,
-                }),
-              })
-            );
+          if (newStrokes.length > 0) {
+            await fetch('/api/strokes/save', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                roomId,
+                party: 'student',
+                studentId,
+                studentName: student.name,
+                strokes: newStrokes,
+              }),
+            });
+
+            // Mark strokes as saved
+            newStrokes.forEach(stroke => lastSavedIds.add(stroke.strokeId));
+            lastSavedStrokesRef.current.students[studentId] = lastSavedIds;
+            console.log(`💾 Saved ${newStrokes.length} new student strokes for ${student.name}`);
           }
-        });
+        }
 
-        if (savePromises.length > 0) {
-          await Promise.all(savePromises);
-          console.log(`💾 Saved ${savePromises.length} changed student(s) to Redis`);
+        // Save new teacher annotation strokes (across all students)
+        const allTeacherAnnotations = Object.values(teacherAnnotations).flat();
+        const lastSavedTeacherIds = lastSavedStrokesRef.current.teacher || new Set();
+        const newTeacherStrokes = allTeacherAnnotations.filter(
+          ann => ann.strokeId && !lastSavedTeacherIds.has(ann.strokeId)
+        );
+
+        if (newTeacherStrokes.length > 0) {
+          await fetch('/api/strokes/save', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              roomId,
+              party: 'teacher',
+              strokes: newTeacherStrokes,
+            }),
+          });
+
+          // Mark strokes as saved
+          newTeacherStrokes.forEach(stroke => lastSavedTeacherIds.add(stroke.strokeId));
+          lastSavedStrokesRef.current.teacher = lastSavedTeacherIds;
+          console.log(`💾 Saved ${newTeacherStrokes.length} new teacher annotation strokes`);
         }
       } catch (error) {
         console.error('Error auto-saving to Redis:', error);
       }
-    }, 3000); // 3 second debounce (increased from 2s to reduce write frequency)
+    }, 3000); // 3 second debounce
 
     return () => {
       if (saveTimerRef.current) {
@@ -804,16 +822,31 @@ const TeacherDashboard = () => {
 
         setChannel(whiteboardChannel);
 
-        // Load strokes from Redis ONLY on page refresh (not on normal navigation)
-        // Check if this is a page refresh using performance API
+        // Load strokes ONLY on page refresh (IndexedDB for teacher, Redis for students)
         const isPageRefresh = performance.navigation.type === 1 || 
                              performance.getEntriesByType('navigation')[0]?.type === 'reload';
         
         if (isPageRefresh) {
           setTimeout(async () => {
             try {
-              console.log('🔄 Page refresh detected - loading strokes from Redis...');
-              const response = await fetch(`/api/strokes/load?roomId=${roomId}`);
+              console.log('🔄 Page refresh detected - loading from IndexedDB + Redis...');
+              
+              // Load teacher's own annotations from IndexedDB
+              const teacherStrokes = await loadStrokesFromIndexedDB();
+              if (teacherStrokes && teacherStrokes.length > 0) {
+                console.log(`✅ Loaded ${teacherStrokes.length} teacher annotations from IndexedDB`);
+                // Group teacher strokes by studentId if they have that property
+                const groupedAnnotations = {};
+                teacherStrokes.forEach(stroke => {
+                  // Note: We'll need to track which student each annotation belongs to
+                  // For now, we'll load all teacher annotations into a temp structure
+                  // and distribute them once we know the students
+                });
+                // TODO: Properly associate teacher annotations with students
+              }
+
+              // Load all students' strokes from Redis
+              const response = await fetch(`/api/strokes/load?roomId=${roomId}&party=students`);
               
               if (response.ok) {
                 const data = await response.json();
@@ -821,25 +854,24 @@ const TeacherDashboard = () => {
                 if (data.students && Object.keys(data.students).length > 0) {
                   console.log(`✅ Restored ${Object.keys(data.students).length} students' data from Redis after refresh`);
                   
-                  // Merge Redis data with current state
+                  // Merge Redis student data with current state
                   setStudents(prev => {
                     const updated = { ...prev };
                     
                     Object.entries(data.students).forEach(([studentId, redisData]) => {
                       if (updated[studentId]) {
-                        // Student exists, merge the lines
+                        // Student exists, merge the strokes
                         updated[studentId] = {
                           ...updated[studentId],
-                          lines: redisData.lines || [],
+                          lines: redisData.strokes || [],
                         };
                       } else {
                         // Student doesn't exist yet (they might have disconnected)
-                        // Store their data for when they reconnect
                         updated[studentId] = {
                           studentId,
                           clientId: undefined, // Will be filled when they reconnect
                           name: redisData.meta?.name || 'Unknown',
-                          lines: redisData.lines || [],
+                          lines: redisData.strokes || [],
                           isActive: false,
                           lastUpdate: Date.now(),
                         };
@@ -848,29 +880,29 @@ const TeacherDashboard = () => {
                     
                     return updated;
                   });
-
-                  // Load teacher annotations
-                  setTeacherAnnotations(prev => {
-                    const updated = { ...prev };
-                    
-                    Object.entries(data.students).forEach(([studentId, redisData]) => {
-                      if (redisData.annotations && redisData.annotations.length > 0) {
-                        updated[studentId] = redisData.annotations;
-                      }
-                    });
-                    
-                    return updated;
-                  });
                 } else {
-                  console.log('ℹ️ No cached data found in Redis (fresh session or cache expired)');
+                  console.log('ℹ️ No student data found in Redis');
+                }
+              }
+
+              // Load teacher annotations from Redis (all teacher strokes)
+              const teacherResponse = await fetch(`/api/strokes/load?roomId=${roomId}&party=teacher`);
+              if (teacherResponse.ok) {
+                const teacherData = await teacherResponse.json();
+                if (teacherData.strokes && teacherData.strokes.length > 0) {
+                  console.log(`✅ Loaded ${teacherData.strokes.length} teacher annotations from Redis`);
+                  // Note: Teacher annotations in Redis don't have studentId association
+                  // We'll need to rethink how to store which student each annotation belongs to
+                  // For now, skip loading teacher annotations from Redis
+                  // and rely on IndexedDB + re-annotation
                 }
               }
             } catch (error) {
-              console.error('Error loading strokes from Redis:', error);
+              console.error('Error loading strokes on refresh:', error);
             }
           }, 1000); // Small delay to ensure channel is fully set up
         } else {
-          console.log('ℹ️ Normal page load - skipping Redis restore');
+          console.log('ℹ️ Normal page load - skipping persistence restore');
         }
       } catch (error) {
         console.error('Failed to connect to Ably:', error);
@@ -937,6 +969,19 @@ const TeacherDashboard = () => {
       timestamp: Date.now(),
     });
 
+    // Save to IndexedDB immediately after Ably publish (150ms delay)
+    setTimeout(async () => {
+      try {
+        // Save each annotation stroke to IndexedDB
+        for (const annotation of annotations) {
+          if (annotation.strokeId) {
+            await saveStrokeToIndexedDB(annotation);
+          }
+        }
+      } catch (error) {
+        console.error('Error saving annotations to IndexedDB:', error);
+      }
+    }, 150);
   };
 
   const toggleFlag = (studentId) => {
@@ -1314,6 +1359,14 @@ const TeacherDashboard = () => {
         return updated;
       });
       setTeacherAnnotations({}); // Clear all teacher annotations
+
+      // Clear IndexedDB for teacher's own annotations
+      try {
+        await clearStrokesFromIndexedDB();
+        console.log('🗑️ Cleared teacher annotations from IndexedDB');
+      } catch (error) {
+        console.error('Error clearing IndexedDB:', error);
+      }
 
       // Update local shared image state
       if (prepTab === 'blank') {
@@ -1813,6 +1866,7 @@ const TeacherDashboard = () => {
           selectedStudentData ? (teacherAnnotations[selectedStudentData.studentId] || []) : []
         }
         sharedImage={sharedImage}
+        generateStrokeId={generateStrokeId}
       />
 
       <div className="dashboard-footer">

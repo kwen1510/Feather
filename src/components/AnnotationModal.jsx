@@ -22,6 +22,7 @@ const AnnotationModal = ({
   isFlagged = false,
   onToggleFlag,
   sharedImage,
+  generateStrokeId, // Function to generate unique stroke IDs
 }) => {
   const [tool, setTool] = useState('pen');
   const [color, setColor] = useState(colorOptions[0].value);
@@ -317,7 +318,13 @@ const AnnotationModal = ({
       setIsDrawing(true);
       const pos = stage.getPointerPosition();
       const { x, y } = normalizePoint(pos);
-      const newLine = { tool: 'pen', points: [x, y], color, strokeWidth: brushSize };
+      const newLine = { 
+        tool: 'pen', 
+        points: [x, y], 
+        color, 
+        strokeWidth: brushSize,
+        strokeId: generateStrokeId ? generateStrokeId() : `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+      };
       undoStack.current.push([...teacherAnnotations]);
       redoStack.current = [];
 

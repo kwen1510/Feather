@@ -5,7 +5,11 @@ import * as Ably from 'ably';
 import { supabase } from '../supabaseClient';
 import { Pen, Eraser, Undo, Redo, Trash2 } from 'lucide-react';
 import { getOrCreateStudentId } from '../utils/identity';
+import { saveStroke as saveStrokeToIndexedDB, loadStrokes as loadStrokesFromIndexedDB, clearStrokes as clearStrokesFromIndexedDB } from '../utils/indexedDB';
 import './StudentNew.css';
+
+// Generate unique stroke ID
+const generateStrokeId = () => `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
 const BASE_CANVAS = { width: 800, height: 600 };
 const MIN_SCALE = 0.65;
@@ -264,19 +268,22 @@ function Student() {
     }
   }, [studentLines, channel, clientId, studentId, canvasSize, canvasScale]);
 
-  // Track last saved state to avoid unnecessary Redis writes
-  const lastSavedLinesRef = useRef('');
+  // Track last saved stroke IDs to avoid unnecessary Redis writes
+  const lastSavedStrokeIds = useRef(new Set());
 
-  // Auto-save student strokes to Redis (debounced for performance, only if changed)
+  // Auto-save student strokes to Redis (debounced, only saves new strokes since last save)
   useEffect(() => {
     if (!roomId || !studentId || !studentName) return;
 
     const timer = setTimeout(async () => {
       try {
-        // Only save if lines actually changed
-        const currentHash = JSON.stringify(studentLines);
-        if (currentHash === lastSavedLinesRef.current) {
-          return; // No changes, skip save
+        // Find strokes not yet saved
+        const newStrokes = studentLines.filter(
+          line => line.strokeId && !lastSavedStrokeIds.current.has(line.strokeId)
+        );
+
+        if (newStrokes.length === 0) {
+          return; // No new strokes, skip save
         }
 
         await fetch('/api/strokes/save', {
@@ -284,18 +291,20 @@ function Student() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             roomId,
+            party: 'student',
             studentId,
-            lines: studentLines,
             studentName,
+            strokes: newStrokes,
           }),
         });
 
-        lastSavedLinesRef.current = currentHash;
-        console.log(`💾 Saved ${studentLines.length} lines to Redis`);
+        // Mark strokes as saved
+        newStrokes.forEach(stroke => lastSavedStrokeIds.current.add(stroke.strokeId));
+        console.log(`💾 Saved ${newStrokes.length} new student strokes to Redis`);
       } catch (error) {
         console.error('Error auto-saving strokes to Redis:', error);
       }
-    }, 3000); // 3 second debounce (increased to reduce write frequency)
+    }, 3000); // 3 second debounce
 
     return () => clearTimeout(timer);
   }, [studentLines, roomId, studentId, studentName]);
@@ -569,6 +578,13 @@ function Student() {
           setTimeout(() => {
             isRemoteUpdate.current = false;
           }, 100);
+
+          // Clear IndexedDB for student's own strokes
+          clearStrokesFromIndexedDB().then(() => {
+            console.log('🗑️ Cleared student strokes from IndexedDB');
+          }).catch(error => {
+            console.error('Error clearing IndexedDB:', error);
+          });
         });
 
         // Listen for session started
@@ -611,7 +627,7 @@ function Student() {
           });
         }, 500);
 
-        // Load own strokes from Redis ONLY on page refresh (not on normal navigation)
+        // Load strokes ONLY on page refresh (IndexedDB for own, Redis for teacher annotations)
         const isPageRefresh = performance.navigation.type === 1 || 
                              performance.getEntriesByType('navigation')[0]?.type === 'reload';
         
@@ -620,31 +636,41 @@ function Student() {
             if (!isActive) return;
             
             try {
-              console.log('🔄 Page refresh detected - loading own strokes from Redis...');
-              const response = await fetch(`/api/strokes/load?roomId=${roomId}&studentId=${studentId}`);
+              console.log('🔄 Page refresh detected - loading from IndexedDB + Redis...');
               
+              // Load student's own strokes from IndexedDB
+              const ownStrokes = await loadStrokesFromIndexedDB();
+              if (ownStrokes && ownStrokes.length > 0) {
+                console.log(`✅ Loaded ${ownStrokes.length} own strokes from IndexedDB`);
+                isRemoteUpdate.current = true;
+                setStudentLines(ownStrokes);
+                setTimeout(() => {
+                  isRemoteUpdate.current = false;
+                }, 100);
+              }
+
+              // Load teacher annotations from Redis
+              const response = await fetch(`/api/strokes/load?roomId=${roomId}&party=teacher`);
               if (response.ok) {
                 const data = await response.json();
-                
-                if (data.lines && data.lines.length > 0) {
-                  console.log(`✅ Restored ${data.lines.length} lines from Redis after refresh`);
-                  
+                if (data.strokes && data.strokes.length > 0) {
+                  console.log(`✅ Loaded ${data.strokes.length} teacher annotations from Redis`);
+                  // Set teacher annotations from Redis
                   isRemoteUpdate.current = true;
-                  setStudentLines(data.lines);
-                  
+                  setTeacherAnnotations(data.strokes);
                   setTimeout(() => {
                     isRemoteUpdate.current = false;
                   }, 100);
                 } else {
-                  console.log('ℹ️ No cached strokes found in Redis');
+                  console.log('ℹ️ No teacher annotations found in Redis');
                 }
               }
             } catch (error) {
-              console.error('Error loading strokes from Redis:', error);
+              console.error('Error loading strokes on refresh:', error);
             }
           }, 700); // Slightly after requesting current state
         } else {
-          console.log('ℹ️ Normal page load - skipping Redis restore');
+          console.log('ℹ️ Normal page load - skipping persistence restore');
         }
       } catch (error) {
         console.error('Failed to initialize Ably:', error);
@@ -799,6 +825,7 @@ function Student() {
         points: [baseX, baseY],
         color,
         strokeWidth: brushSize / canvasScale,
+        strokeId: generateStrokeId(), // Add unique stroke ID
       };
 
       // Store in ref for smooth drawing
@@ -908,6 +935,19 @@ function Student() {
       return;
     }
     setIsDrawing(false);
+
+    // Save the stroke to IndexedDB immediately after drawing (150ms delay)
+    if (currentLineRef.current && currentLineRef.current.strokeId) {
+      const strokeToSave = currentLineRef.current;
+      setTimeout(async () => {
+        try {
+          await saveStrokeToIndexedDB(strokeToSave);
+        } catch (error) {
+          console.error('Error saving stroke to IndexedDB:', error);
+        }
+      }, 150);
+    }
+
     currentLineRef.current = null; // Clear the current line ref
   };
 

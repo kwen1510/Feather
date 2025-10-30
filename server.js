@@ -180,24 +180,38 @@ async function saveAnnotationsToSupabase(sessionId, questionId, participantId, s
 // ==================== REDIS HELPER FUNCTIONS ====================
 
 /**
- * Get Redis key for student lines
+ * Get Redis key for an individual student stroke
  */
-function getStudentLinesKey(roomId, studentId) {
-  return `room:${roomId}:student:${studentId}:lines`;
+function getStudentStrokeKey(roomId, studentId, strokeId) {
+  return `room:${roomId}:student:${studentId}:stroke:${strokeId}`;
 }
 
 /**
- * Get Redis key for teacher annotations for a specific student
+ * Get Redis key pattern for all student strokes
  */
-function getTeacherAnnotationsKey(roomId, studentId) {
-  return `room:${roomId}:teacher:annotations:${studentId}`;
+function getStudentStrokesPattern(roomId, studentId) {
+  return `room:${roomId}:student:${studentId}:stroke:*`;
 }
 
 /**
- * Get Redis key for current question metadata
+ * Get Redis key for an individual teacher annotation stroke
  */
-function getQuestionMetaKey(roomId) {
-  return `room:${roomId}:question:meta`;
+function getTeacherStrokeKey(roomId, strokeId) {
+  return `room:${roomId}:teacher:stroke:${strokeId}`;
+}
+
+/**
+ * Get Redis key pattern for all teacher strokes
+ */
+function getTeacherStrokesPattern(roomId) {
+  return `room:${roomId}:teacher:stroke:*`;
+}
+
+/**
+ * Get Redis key for student metadata
+ */
+function getStudentMetaKey(roomId, studentId) {
+  return `room:${roomId}:student:${studentId}:meta`;
 }
 
 const server = createServer(async (req, res) => {
@@ -231,38 +245,55 @@ const server = createServer(async (req, res) => {
     return;
   }
 
-  // Handle POST /api/strokes/save - Save strokes to Redis
+  // Handle POST /api/strokes/save - Save individual strokes to Redis
   if (req.url === '/api/strokes/save' && req.method === 'POST') {
     try {
       const body = await parseBody(req);
-      const { roomId, studentId, lines, annotations, studentName } = body;
+      const { roomId, strokes, party, studentId, studentName } = body;
+      
+      // party: 'student' or 'teacher'
+      // strokes: array of stroke objects, each with strokeId
 
-      if (!roomId || !studentId) {
+      if (!roomId || !party || !strokes) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'Missing roomId or studentId' }));
+        res.end(JSON.stringify({ error: 'Missing required fields: roomId, party, strokes' }));
         return;
       }
 
-      // Save student lines to Redis
-      if (lines !== undefined) {
-        const key = getStudentLinesKey(roomId, studentId);
-        await redis.set(key, JSON.stringify(lines), { ex: 86400 }); // 24 hour expiry
+      if (party === 'student' && !studentId) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Missing studentId for student party' }));
+        return;
       }
 
-      // Save teacher annotations to Redis (if provided)
-      if (annotations !== undefined) {
-        const key = getTeacherAnnotationsKey(roomId, studentId);
-        await redis.set(key, JSON.stringify(annotations), { ex: 86400 });
+      let savedCount = 0;
+
+      // Save each stroke individually
+      for (const stroke of strokes) {
+        if (!stroke.strokeId) {
+          console.warn('Stroke missing strokeId, skipping');
+          continue;
+        }
+
+        let key;
+        if (party === 'teacher') {
+          key = getTeacherStrokeKey(roomId, stroke.strokeId);
+        } else {
+          key = getStudentStrokeKey(roomId, studentId, stroke.strokeId);
+        }
+
+        await redis.set(key, JSON.stringify(stroke), { ex: 86400 }); // 24 hour expiry
+        savedCount++;
       }
 
       // Save student metadata (name) for later reference
-      if (studentName) {
-        const metaKey = `room:${roomId}:student:${studentId}:meta`;
+      if (party === 'student' && studentName) {
+        const metaKey = getStudentMetaKey(roomId, studentId);
         await redis.set(metaKey, JSON.stringify({ name: studentName }), { ex: 86400 });
       }
 
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ success: true }));
+      res.end(JSON.stringify({ success: true, savedCount }));
     } catch (err) {
       console.error('Save strokes error:', err);
       res.writeHead(500, { 'Content-Type': 'application/json' });
@@ -271,113 +302,123 @@ const server = createServer(async (req, res) => {
     return;
   }
 
-  // Handle GET /api/strokes/load - Load strokes from Redis
+  // Handle GET /api/strokes/load - Load strokes by party from Redis
   if (req.url.startsWith('/api/strokes/load') && req.method === 'GET') {
     try {
       const url = new URL(req.url, `http://localhost:${PORT}`);
       const roomId = url.searchParams.get('roomId');
-      const studentId = url.searchParams.get('studentId');
+      const party = url.searchParams.get('party'); // 'teacher' or 'students'
+      const studentId = url.searchParams.get('studentId'); // required if party=students
 
-      if (!roomId) {
+      if (!roomId || !party) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'Missing roomId' }));
+        res.end(JSON.stringify({ error: 'Missing roomId or party' }));
         return;
       }
 
-      // If studentId provided, load specific student's data
-      if (studentId) {
-        const linesKey = getStudentLinesKey(roomId, studentId);
-        const annotationsKey = getTeacherAnnotationsKey(roomId, studentId);
-
+      if (party === 'teacher') {
+        // Load all teacher annotation strokes
+        const pattern = getTeacherStrokesPattern(roomId);
+        let keys = [];
+        
         try {
-          const [lines, annotations] = await Promise.all([
-            redis.get(linesKey),
-            redis.get(annotationsKey)
-          ]);
-
-          // Handle Redis returning null, objects, or strings
-          let parsedLines = [];
-          let parsedAnnotations = [];
-
-          if (lines) {
-            parsedLines = typeof lines === 'string' ? JSON.parse(lines) : (Array.isArray(lines) ? lines : []);
-          }
-          
-          if (annotations) {
-            parsedAnnotations = typeof annotations === 'string' ? JSON.parse(annotations) : (Array.isArray(annotations) ? annotations : []);
-          }
-
-          res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({
-            studentId,
-            lines: parsedLines,
-            annotations: parsedAnnotations
-          }));
-        } catch (parseError) {
-          console.error(`Error loading data for student ${studentId}:`, parseError.message);
-          // Return empty data if parsing fails
-          res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({
-            studentId,
-            lines: [],
-            annotations: []
-          }));
+          const scanResult = await redis.keys(pattern);
+          keys = Array.isArray(scanResult) ? scanResult : [];
+        } catch (scanError) {
+          console.warn('Redis keys scan failed:', scanError.message);
+          keys = [];
         }
+
+        const strokes = [];
+        for (const key of keys) {
+          try {
+            const strokeData = await redis.get(key);
+            if (strokeData) {
+              const stroke = typeof strokeData === 'string' ? JSON.parse(strokeData) : strokeData;
+              strokes.push(stroke);
+            }
+          } catch (parseError) {
+            console.error(`Error parsing stroke from key ${key}:`, parseError.message);
+          }
+        }
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ party: 'teacher', strokes }));
         return;
       }
 
-      // If no studentId, load all students' data for this room (for teacher)
-      // Use scan instead of keys for better Upstash compatibility
-      const pattern = `room:${roomId}:student:*:lines`;
-      let keys = [];
-      
-      try {
-        const scanResult = await redis.keys(pattern);
-        // Upstash returns array directly
-        keys = Array.isArray(scanResult) ? scanResult : [];
-      } catch (scanError) {
-        console.warn('Redis keys scan failed, trying alternative:', scanError.message);
-        // If keys fails, return empty (no cached data)
-        keys = [];
-      }
-      
-      const studentsData = {};
-      
-      if (keys.length > 0) {
-        for (const key of keys) {
-          // Extract studentId from key: room:roomId:student:studentId:lines
-          const parts = key.split(':');
-          if (parts.length < 4) continue; // Skip invalid keys
-          
-          const sid = parts[3];
-          
-          const linesKey = getStudentLinesKey(roomId, sid);
-          const annotationsKey = getTeacherAnnotationsKey(roomId, sid);
-          const metaKey = `room:${roomId}:student:${sid}:meta`;
-
-          try {
-            const [lines, annotations, meta] = await Promise.all([
-              redis.get(linesKey),
-              redis.get(annotationsKey),
-              redis.get(metaKey)
-            ]);
-
-            studentsData[sid] = {
-              studentId: sid,
-              lines: lines ? (typeof lines === 'string' ? JSON.parse(lines) : lines) : [],
-              annotations: annotations ? (typeof annotations === 'string' ? JSON.parse(annotations) : annotations) : [],
-              meta: meta ? (typeof meta === 'string' ? JSON.parse(meta) : meta) : {}
-            };
-          } catch (parseError) {
-            console.error(`Error loading data for student ${sid}:`, parseError.message);
-            // Skip this student if data is corrupted
-            continue;
-          }
+      if (party === 'students') {
+        // Load all students' strokes for this room
+        // Get all unique student IDs first by scanning for meta keys
+        const metaPattern = `room:${roomId}:student:*:meta`;
+        let metaKeys = [];
+        
+        try {
+          const scanResult = await redis.keys(metaPattern);
+          metaKeys = Array.isArray(scanResult) ? scanResult : [];
+        } catch (scanError) {
+          console.warn('Redis keys scan failed:', scanError.message);
+          metaKeys = [];
         }
+
+        const studentsData = {};
+
+        for (const metaKey of metaKeys) {
+          // Extract studentId from meta key
+          const parts = metaKey.split(':');
+          if (parts.length < 4) continue;
+          const sid = parts[3];
+
+          // Load all strokes for this student
+          const strokePattern = getStudentStrokesPattern(roomId, sid);
+          let strokeKeys = [];
+          
+          try {
+            const scanResult = await redis.keys(strokePattern);
+            strokeKeys = Array.isArray(scanResult) ? scanResult : [];
+          } catch (scanError) {
+            console.warn(`Failed to scan strokes for student ${sid}`);
+            strokeKeys = [];
+          }
+
+          const studentStrokes = [];
+          for (const strokeKey of strokeKeys) {
+            try {
+              const strokeData = await redis.get(strokeKey);
+              if (strokeData) {
+                const stroke = typeof strokeData === 'string' ? JSON.parse(strokeData) : strokeData;
+                studentStrokes.push(stroke);
+              }
+            } catch (parseError) {
+              console.error(`Error parsing stroke for student ${sid}:`, parseError.message);
+            }
+          }
+
+          // Get student metadata
+          let meta = {};
+          try {
+            const metaData = await redis.get(metaKey);
+            if (metaData) {
+              meta = typeof metaData === 'string' ? JSON.parse(metaData) : metaData;
+            }
+          } catch (parseError) {
+            console.error(`Error parsing meta for student ${sid}:`, parseError.message);
+          }
+
+          studentsData[sid] = {
+            studentId: sid,
+            strokes: studentStrokes,
+            meta
+          };
+        }
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ party: 'students', students: studentsData }));
+        return;
       }
 
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ students: studentsData }));
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Invalid party. Must be "teacher" or "students"' }));
     } catch (err) {
       console.error('Load strokes error:', err);
       res.writeHead(500, { 'Content-Type': 'application/json' });
@@ -403,46 +444,84 @@ const server = createServer(async (req, res) => {
       // Step 1: Create the question in Supabase
       const question = await saveQuestionToSupabase(sessionId, questionNumber, contentType, content);
 
-      // Step 2: Load all student data from Redis
-      const pattern = `room:${roomId}:student:*:lines`;
-      let keys = [];
+      // Step 2: Load all student data from Redis (using new individual stroke structure)
+      const metaPattern = `room:${roomId}:student:*:meta`;
+      let metaKeys = [];
       
       try {
-        const scanResult = await redis.keys(pattern);
-        keys = Array.isArray(scanResult) ? scanResult : [];
+        const scanResult = await redis.keys(metaPattern);
+        metaKeys = Array.isArray(scanResult) ? scanResult : [];
       } catch (scanError) {
         console.warn('Redis keys scan failed:', scanError.message);
-        keys = [];
+        metaKeys = [];
       }
       
       let savedCount = 0;
-      for (const key of keys) {
-        const parts = key.split(':');
+      for (const metaKey of metaKeys) {
+        const parts = metaKey.split(':');
         if (parts.length < 4) continue;
         
         const studentId = parts[3];
         
-        const linesKey = getStudentLinesKey(roomId, studentId);
-        const annotationsKey = getTeacherAnnotationsKey(roomId, studentId);
-        const metaKey = `room:${roomId}:student:${studentId}:meta`;
-
-        let studentLines = [];
-        let teacherAnnotations = [];
-        let studentMeta = {};
-
+        // Load all student strokes
+        const studentStrokePattern = getStudentStrokesPattern(roomId, studentId);
+        let studentStrokeKeys = [];
+        
         try {
-          const [lines, annotations, meta] = await Promise.all([
-            redis.get(linesKey),
-            redis.get(annotationsKey),
-            redis.get(metaKey)
-          ]);
+          const scanResult = await redis.keys(studentStrokePattern);
+          studentStrokeKeys = Array.isArray(scanResult) ? scanResult : [];
+        } catch (scanError) {
+          console.warn(`Failed to scan student strokes for ${studentId}`);
+          studentStrokeKeys = [];
+        }
 
-          studentLines = lines ? (typeof lines === 'string' ? JSON.parse(lines) : lines) : [];
-          teacherAnnotations = annotations ? (typeof annotations === 'string' ? JSON.parse(annotations) : annotations) : [];
-          studentMeta = meta ? (typeof meta === 'string' ? JSON.parse(meta) : meta) : {};
+        const studentLines = [];
+        for (const strokeKey of studentStrokeKeys) {
+          try {
+            const strokeData = await redis.get(strokeKey);
+            if (strokeData) {
+              const stroke = typeof strokeData === 'string' ? JSON.parse(strokeData) : strokeData;
+              studentLines.push(stroke);
+            }
+          } catch (parseError) {
+            console.error(`Error parsing student stroke:`, parseError.message);
+          }
+        }
+
+        // Load all teacher annotation strokes
+        const teacherStrokePattern = getTeacherStrokesPattern(roomId);
+        let teacherStrokeKeys = [];
+        
+        try {
+          const scanResult = await redis.keys(teacherStrokePattern);
+          teacherStrokeKeys = Array.isArray(scanResult) ? scanResult : [];
+        } catch (scanError) {
+          console.warn('Failed to scan teacher strokes');
+          teacherStrokeKeys = [];
+        }
+
+        const teacherAnnotations = [];
+        for (const strokeKey of teacherStrokeKeys) {
+          try {
+            const strokeData = await redis.get(strokeKey);
+            if (strokeData) {
+              const stroke = typeof strokeData === 'string' ? JSON.parse(strokeData) : strokeData;
+              teacherAnnotations.push(stroke);
+            }
+          } catch (parseError) {
+            console.error(`Error parsing teacher stroke:`, parseError.message);
+          }
+        }
+
+        // Get student metadata
+        let studentMeta = {};
+        try {
+          const metaData = await redis.get(metaKey);
+          if (metaData) {
+            studentMeta = typeof metaData === 'string' ? JSON.parse(metaData) : metaData;
+          }
         } catch (parseError) {
-          console.error(`Error parsing data for student ${studentId}:`, parseError.message);
-          continue;
+          console.error(`Error parsing meta for student ${studentId}:`, parseError.message);
         }
 
         // Only save if there's actual content
@@ -496,12 +575,11 @@ const server = createServer(async (req, res) => {
         return;
       }
 
-      // Delete all Redis keys for this room
+      // Delete all Redis keys for this room (individual stroke structure)
       const patterns = [
-        `room:${roomId}:student:*:lines`,
-        `room:${roomId}:student:*:meta`,
-        `room:${roomId}:teacher:annotations:*`,
-        `room:${roomId}:question:meta`
+        `room:${roomId}:student:*:stroke:*`,  // All student strokes
+        `room:${roomId}:student:*:meta`,       // Student metadata
+        `room:${roomId}:teacher:stroke:*`      // All teacher strokes
       ];
 
       let deletedCount = 0;
