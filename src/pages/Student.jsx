@@ -264,6 +264,50 @@ function Student() {
     }
   }, [studentLines, channel, clientId, studentId, canvasSize, canvasScale]);
 
+  // Auto-save student strokes to Redis (debounced for performance)
+  useEffect(() => {
+    if (!roomId || !studentId || !studentName) return;
+
+    const timer = setTimeout(async () => {
+      try {
+        await fetch('/api/strokes/save', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            roomId,
+            studentId,
+            lines: studentLines,
+            studentName,
+          }),
+        });
+      } catch (error) {
+        console.error('Error auto-saving strokes to Redis:', error);
+      }
+    }, 2000); // 2 second debounce
+
+    return () => clearTimeout(timer);
+  }, [studentLines, roomId, studentId, studentName]);
+
+  // Save strokes on page unload (for closing tab or refresh)
+  useEffect(() => {
+    if (!roomId || !studentId || !studentName) return;
+
+    const handleBeforeUnload = () => {
+      // Use sendBeacon for reliable last-second save
+      const data = JSON.stringify({
+        roomId,
+        studentId,
+        lines: studentLines,
+        studentName,
+      });
+      
+      navigator.sendBeacon('/api/strokes/save', data);
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [studentLines, roomId, studentId, studentName]);
+
   // Cleanup animation frame on unmount
   useEffect(() => {
     return () => {
@@ -554,6 +598,33 @@ function Student() {
             timestamp: Date.now(),
           });
         }, 500);
+
+        // Load own strokes from Redis (for page refresh recovery)
+        setTimeout(async () => {
+          if (!isActive) return;
+          
+          try {
+            console.log('📥 Loading own strokes from Redis...');
+            const response = await fetch(`/api/strokes/load?roomId=${roomId}&studentId=${studentId}`);
+            
+            if (response.ok) {
+              const data = await response.json();
+              
+              if (data.lines && data.lines.length > 0) {
+                console.log(`✅ Restored ${data.lines.length} lines from Redis`);
+                
+                isRemoteUpdate.current = true;
+                setStudentLines(data.lines);
+                
+                setTimeout(() => {
+                  isRemoteUpdate.current = false;
+                }, 100);
+              }
+            }
+          } catch (error) {
+            console.error('Error loading strokes from Redis:', error);
+          }
+        }, 700); // Slightly after requesting current state
       } catch (error) {
         console.error('Failed to initialize Ably:', error);
       }

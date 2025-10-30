@@ -53,6 +53,9 @@ const TeacherDashboard = () => {
   const [isConnected, setIsConnected] = useState(false);
   const [clientId] = useState(`teacher-${Math.random().toString(36).substring(7)}`);
 
+  // Question tracking for persistence
+  const [currentQuestionNumber, setCurrentQuestionNumber] = useState(0);
+
   // Student management (keyed by persistent studentId, not volatile clientId)
   const [students, setStudents] = useState(() => {
     // Check if bot parameter is in URL
@@ -135,6 +138,32 @@ const TeacherDashboard = () => {
     }
 
     try {
+      // SAVE FINAL QUESTION DATA BEFORE ENDING SESSION
+      if (currentQuestionNumber > 0 && roomId) {
+        console.log(`💾 Saving final question ${currentQuestionNumber} before ending session...`);
+        
+        try {
+          const response = await fetch('/api/strokes/persist', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              roomId,
+              sessionId,
+              questionNumber: currentQuestionNumber,
+              contentType: sharedImage?.type ? 'template' : (sharedImage ? 'image' : 'blank'),
+              content: sharedImage,
+            }),
+          });
+
+          if (response.ok) {
+            const result = await response.json();
+            console.log(`✅ Saved final ${result.savedCount} student responses before ending`);
+          }
+        } catch (persistError) {
+          console.error('Error saving final question:', persistError);
+        }
+      }
+
       await supabase
         .from('sessions')
         .update({
@@ -163,7 +192,39 @@ const TeacherDashboard = () => {
       console.error('Error ending session:', error);
       return false;
     }
-  }, [sessionId, sessionStatus, channel]);
+  }, [sessionId, sessionStatus, channel, currentQuestionNumber, roomId, sharedImage]);
+
+  // Auto-save strokes to Redis (debounced for performance)
+  useEffect(() => {
+    if (!roomId || !sessionId || currentQuestionNumber === 0) return;
+
+    const timer = setTimeout(async () => {
+      try {
+        // Save each student's strokes and annotations to Redis
+        const savePromises = Object.entries(students).map(async ([studentId, student]) => {
+          if (!student.lines && !teacherAnnotations[studentId]) return;
+
+          return fetch('/api/strokes/save', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              roomId,
+              studentId,
+              lines: student.lines || [],
+              annotations: teacherAnnotations[studentId] || [],
+              studentName: student.name,
+            }),
+          });
+        });
+
+        await Promise.all(savePromises);
+      } catch (error) {
+        console.error('Error auto-saving to Redis:', error);
+      }
+    }, 2000); // 2 second debounce
+
+    return () => clearTimeout(timer);
+  }, [students, teacherAnnotations, roomId, sessionId, currentQuestionNumber]);
 
   // Save settings to localStorage
   useEffect(() => {
@@ -709,6 +770,65 @@ const TeacherDashboard = () => {
         });
 
         setChannel(whiteboardChannel);
+
+        // Load strokes from Redis after connection (for page refresh recovery)
+        setTimeout(async () => {
+          try {
+            console.log('📥 Loading strokes from Redis...');
+            const response = await fetch(`/api/strokes/load?roomId=${roomId}`);
+            
+            if (response.ok) {
+              const data = await response.json();
+              
+              if (data.students && Object.keys(data.students).length > 0) {
+                console.log(`✅ Loaded ${Object.keys(data.students).length} students' data from Redis`);
+                
+                // Merge Redis data with current state
+                setStudents(prev => {
+                  const updated = { ...prev };
+                  
+                  Object.entries(data.students).forEach(([studentId, redisData]) => {
+                    if (updated[studentId]) {
+                      // Student exists, merge the lines
+                      updated[studentId] = {
+                        ...updated[studentId],
+                        lines: redisData.lines || [],
+                      };
+                    } else {
+                      // Student doesn't exist yet (they might have disconnected)
+                      // Store their data for when they reconnect
+                      updated[studentId] = {
+                        studentId,
+                        clientId: undefined, // Will be filled when they reconnect
+                        name: redisData.meta?.name || 'Unknown',
+                        lines: redisData.lines || [],
+                        isActive: false,
+                        lastUpdate: Date.now(),
+                      };
+                    }
+                  });
+                  
+                  return updated;
+                });
+
+                // Load teacher annotations
+                setTeacherAnnotations(prev => {
+                  const updated = { ...prev };
+                  
+                  Object.entries(data.students).forEach(([studentId, redisData]) => {
+                    if (redisData.annotations && redisData.annotations.length > 0) {
+                      updated[studentId] = redisData.annotations;
+                    }
+                  });
+                  
+                  return updated;
+                });
+              }
+            }
+          } catch (error) {
+            console.error('Error loading strokes from Redis:', error);
+          }
+        }, 1000); // Small delay to ensure channel is fully set up
       } catch (error) {
         console.error('Failed to connect to Ably:', error);
       }
@@ -1062,6 +1182,40 @@ const TeacherDashboard = () => {
     setImageMessage('Sending to class...');
 
     try {
+      // STEP 1: Persist current question data to Supabase (if there's data to save)
+      if (currentQuestionNumber > 0) {
+        console.log(`💾 Persisting question ${currentQuestionNumber} before moving to next...`);
+        
+        try {
+          const response = await fetch('/api/strokes/persist', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              roomId,
+              sessionId,
+              questionNumber: currentQuestionNumber,
+              contentType: sharedImage?.type ? 'template' : (sharedImage ? 'image' : 'blank'),
+              content: sharedImage,
+            }),
+          });
+
+          if (response.ok) {
+            const result = await response.json();
+            console.log(`✅ Persisted ${result.savedCount} student responses for question ${currentQuestionNumber}`);
+          } else {
+            console.warn('Failed to persist question, but continuing...', await response.text());
+          }
+        } catch (persistError) {
+          console.error('Error persisting question:', persistError);
+          // Don't block the flow if persistence fails
+        }
+      }
+
+      // STEP 2: Increment question number for the new question
+      const nextQuestionNumber = currentQuestionNumber + 1;
+      setCurrentQuestionNumber(nextQuestionNumber);
+      console.log(`📝 Moving to question ${nextQuestionNumber}`);
+
       // If this is the first content being sent, start the session
       const isFirstContent = sessionStatus === 'created';
 
