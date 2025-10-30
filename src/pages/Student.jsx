@@ -230,6 +230,27 @@ function Student() {
     teacherLinesRef.current = teacherLines;
   }, [teacherLines]);
 
+  // Canvas refs and state - MUST be declared before effects that use them
+  const canvasWrapperRef = useRef(null);
+  const stageRef = useRef(null);
+  const [canvasSize, setCanvasSize] = useState(BASE_CANVAS);
+  const canvasScale = useMemo(
+    () => (BASE_CANVAS.width ? canvasSize.width / BASE_CANVAS.width : 1),
+    [canvasSize.width]
+  );
+
+  // Refs to access latest canvas size and scale in Ably connection handlers
+  const canvasSizeRef = useRef(canvasSize);
+  const canvasScaleRef = useRef(canvasScale);
+  useEffect(() => {
+    canvasSizeRef.current = canvasSize;
+    canvasScaleRef.current = canvasScale;
+  }, [canvasSize, canvasScale]);
+
+  // Performance optimization: keep current line in ref to avoid re-renders
+  const currentLineRef = useRef(null);
+  const animationFrameRef = useRef(null);
+
   // Sync student lines to Ably (publish to teacher)
   useEffect(() => {
     if (!isRemoteUpdate.current && channel) {
@@ -247,10 +268,6 @@ function Student() {
       return () => clearTimeout(timer);
     }
   }, [studentLines, channel, clientId, canvasSize, canvasScale]);
-
-  // Performance optimization: keep current line in ref to avoid re-renders
-  const currentLineRef = useRef(null);
-  const animationFrameRef = useRef(null);
 
   // Cleanup animation frame on unmount
   useEffect(() => {
@@ -305,22 +322,6 @@ function Student() {
       document.removeEventListener('selectstart', preventSelection);
     };
   }, [isDrawing]);
-
-  const canvasWrapperRef = useRef(null);
-  const stageRef = useRef(null);
-  const [canvasSize, setCanvasSize] = useState(BASE_CANVAS);
-  const canvasScale = useMemo(
-    () => (BASE_CANVAS.width ? canvasSize.width / BASE_CANVAS.width : 1),
-    [canvasSize.width]
-  );
-
-  // Refs to access latest canvas size and scale in Ably connection handlers
-  const canvasSizeRef = useRef(canvasSize);
-  const canvasScaleRef = useRef(canvasScale);
-  useEffect(() => {
-    canvasSizeRef.current = canvasSize;
-    canvasScaleRef.current = canvasScale;
-  }, [canvasSize, canvasScale]);
 
   // Validate session (check if session exists before allowing login)
   useEffect(() => {
