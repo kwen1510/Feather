@@ -100,16 +100,7 @@ const TeacherDashboard = () => {
   const [stagedImage, setStagedImage] = useState(null); // Image preview before sending
   const [imageMessage, setImageMessage] = useState('');
   const [isUploadingImage, setIsUploadingImage] = useState(false);
-  const [sharedImage, setSharedImage] = useState(() => {
-    // Restore shared image from localStorage on page load
-    try {
-      const saved = localStorage.getItem(`sharedImage_${roomId}`);
-      return saved ? JSON.parse(saved) : null;
-    } catch (error) {
-      console.error('Error loading shared image from localStorage:', error);
-      return null;
-    }
-  }); // Shared image sent to all students
+  const [sharedImage, setSharedImage] = useState(null); // Shared image sent to all students
   const sharedImageRef = useRef(null); // Ref to access latest sharedImage in callbacks
   const teacherAnnotationsRef = useRef({}); // Ref to access latest teacherAnnotations in callbacks
   const logoutTimerRef = useRef(null);
@@ -124,6 +115,22 @@ const TeacherDashboard = () => {
   const joinedStudentsRef = useRef(new Set()); // Track students who have already joined this session
   const ablyInitializedRef = useRef(false); // Track if Ably has been initialized to prevent duplicates
   const [isLoadingData, setIsLoadingData] = useState(false); // Loading state during page refresh
+
+  // Load shared image from localStorage after roomId is initialized
+  useEffect(() => {
+    if (roomId) {
+      try {
+        const saved = localStorage.getItem(`sharedImage_${roomId}`);
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          setSharedImage(parsed);
+          console.log('✅ Restored shared image from localStorage for room:', roomId);
+        }
+      } catch (error) {
+        console.error('Error loading shared image from localStorage:', error);
+      }
+    }
+  }, [roomId]); // Only run when roomId changes
 
   // Keep ref updated with latest sharedImage and save to localStorage
   useEffect(() => {
