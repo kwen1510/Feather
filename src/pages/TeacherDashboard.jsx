@@ -114,6 +114,7 @@ const TeacherDashboard = () => {
   const sessionInitStateRef = useRef({ roomId: null, status: 'idle' });
   const joinedStudentsRef = useRef(new Set()); // Track students who have already joined this session
   const ablyInitializedRef = useRef(false); // Track if Ably has been initialized to prevent duplicates
+  const [isLoadingData, setIsLoadingData] = useState(false); // Loading state during page refresh
 
   // Keep ref updated with latest sharedImage
   useEffect(() => {
@@ -145,17 +146,30 @@ const TeacherDashboard = () => {
       // SAVE FINAL QUESTION DATA BEFORE ENDING SESSION
       if (currentQuestionNumber > 0 && roomId) {
         console.log(`💾 Saving final question ${currentQuestionNumber} before ending session...`);
-        
+
         try {
+          // Aggregate data from current state (students + teacher annotations)
+          const studentsData = {};
+
+          for (const [studentId, student] of Object.entries(students)) {
+            studentsData[studentId] = {
+              studentLines: student.lines || [],
+              teacherAnnotations: teacherAnnotations[studentId] || [],
+              studentName: student.name || 'Unknown Student',
+            };
+          }
+
+          console.log(`📊 Aggregated data for ${Object.keys(studentsData).length} students`);
+
           const response = await fetch('/api/strokes/persist', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              roomId,
               sessionId,
               questionNumber: currentQuestionNumber,
               contentType: sharedImage?.type ? 'template' : (sharedImage ? 'image' : 'blank'),
               content: sharedImage,
+              studentsData: studentsData,
             }),
           });
 
@@ -198,92 +212,7 @@ const TeacherDashboard = () => {
     }
   }, [sessionId, sessionStatus, channel, currentQuestionNumber, roomId, sharedImage]);
 
-  // Track last saved strokes to avoid unnecessary Redis writes
-  const lastSavedStrokesRef = useRef({ students: {}, teacher: {} });
-  const saveTimerRef = useRef(null);
-
-  // Auto-save strokes to Redis (debounced, only saves new strokes since last save)
-  useEffect(() => {
-    if (!roomId || !sessionId || currentQuestionNumber === 0) return;
-
-    // Clear existing timer
-    if (saveTimerRef.current) {
-      clearTimeout(saveTimerRef.current);
-    }
-
-    saveTimerRef.current = setTimeout(async () => {
-      try {
-        // Save new student strokes
-        for (const [studentId, student] of Object.entries(students)) {
-          const lines = student.lines || [];
-          if (lines.length === 0) continue;
-
-          // Find strokes not yet saved
-          const lastSavedIds = lastSavedStrokesRef.current.students[studentId] || new Set();
-          const newStrokes = lines.filter(line => line.strokeId && !lastSavedIds.has(line.strokeId));
-
-          if (newStrokes.length > 0) {
-            await fetch('/api/strokes/save', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                roomId,
-                party: 'student',
-                studentId,
-                studentName: student.name,
-                strokes: newStrokes,
-              }),
-            });
-
-            // Mark strokes as saved
-            newStrokes.forEach(stroke => lastSavedIds.add(stroke.strokeId));
-            lastSavedStrokesRef.current.students[studentId] = lastSavedIds;
-            console.log(`💾 Saved ${newStrokes.length} new student strokes for ${student.name}`);
-          }
-        }
-
-        // Save ALL teacher annotation strokes (complete replacement to handle erases/undos)
-        // This ensures Redis stays in sync with IndexedDB when strokes are removed
-        if (Object.keys(teacherAnnotations).length > 0) {
-          const totalStrokes = Object.values(teacherAnnotations).flat().length;
-          
-          await fetch('/api/strokes/save', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              roomId,
-              party: 'teacher',
-              annotations: teacherAnnotations, // Send complete current state (grouped by studentId)
-            }),
-          });
-
-          console.log(`💾 Saved complete teacher annotation state to Redis: ${totalStrokes} strokes for ${Object.keys(teacherAnnotations).length} students`);
-        } else if (lastSavedStrokesRef.current.teacher && lastSavedStrokesRef.current.teacher.size > 0) {
-          // If there are no annotations but we previously had some, clear Redis
-          await fetch('/api/strokes/save', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              roomId,
-              party: 'teacher',
-              annotations: {}, // Empty object to clear Redis
-            }),
-          });
-          
-          lastSavedStrokesRef.current.teacher = new Set();
-          console.log('🗑️ Cleared all teacher annotations from Redis');
-        }
-      } catch (error) {
-        console.error('Error auto-saving to Redis:', error);
-      }
-    }, 3000); // 3 second debounce
-
-    return () => {
-      if (saveTimerRef.current) {
-        clearTimeout(saveTimerRef.current);
-      }
-    };
-  }, [students, teacherAnnotations, roomId, sessionId, currentQuestionNumber]);
+  // Redis auto-save removed - now using IndexedDB + Ably recovery only
 
   // Save settings to localStorage
   useEffect(() => {
@@ -515,9 +444,52 @@ const TeacherDashboard = () => {
           clientId: clientId,
         });
 
-        ablyClient.connection.on('connected', () => {
+        let hasInitiallyConnected = false;
+
+        ablyClient.connection.on('connected', async () => {
           setIsConnected(true);
           console.log('✅ Teacher connected to Ably');
+
+          // Handle reconnection - request strokes from all students
+          if (hasInitiallyConnected && whiteboardChannel) {
+            console.log('🔄 Teacher reconnected - requesting strokes from all students');
+
+            try {
+              // Re-enter presence
+              await whiteboardChannel.presence.enter({
+                role: 'teacher',
+                timestamp: Date.now()
+              });
+
+              // Broadcast request for student strokes
+              setTimeout(() => {
+                if (whiteboardChannel && whiteboardChannel.state === 'attached') {
+                  console.log('📤 Broadcasting request for student strokes');
+                  whiteboardChannel.publish('request-student-strokes', {
+                    timestamp: Date.now(),
+                  });
+                }
+              }, 500);
+
+              // Load own annotations from IndexedDB
+              setTimeout(async () => {
+                try {
+                  const { loadAllTeacherAnnotations } = await import('../utils/indexedDB');
+                  const allAnnotations = await loadAllTeacherAnnotations(roomId, 'teacher');
+                  if (Object.keys(allAnnotations).length > 0) {
+                    console.log(`✅ Loaded teacher annotations for ${Object.keys(allAnnotations).length} students from IndexedDB`);
+                    setTeacherAnnotations(allAnnotations);
+                  }
+                } catch (error) {
+                  console.error('❌ Error loading teacher annotations from IndexedDB:', error);
+                }
+              }, 300);
+            } catch (error) {
+              console.error('❌ Error during teacher reconnection:', error);
+            }
+          } else {
+            hasInitiallyConnected = true;
+          }
         });
 
         ablyClient.connection.on('disconnected', () => {
@@ -578,14 +550,22 @@ const TeacherDashboard = () => {
           setStudents(prev => {
             // Check if student already exists (keyed by persistent studentId)
             const existingStudent = prev[incomingStudentId];
+            
+            // Check if student has been in this session before (even if they left)
+            const hasJoinedBefore = joinedStudentsRef.current.has(incomingStudentId);
 
-            // If student exists AND has a valid clientId, treat as reconnection
-            // If student exists but has undefined/null clientId, treat as new (fix for race condition)
-            const isReconnection = existingStudent && existingStudent.clientId;
+            // Reconnection cases:
+            // 1. Student exists in state with clientId (quick reconnect)
+            // 2. Student NOT in state but HAS joined before (rejoining after leave)
+            const isReconnection = (existingStudent && existingStudent.clientId) || 
+                                   (!existingStudent && hasJoinedBefore);
 
             if (isReconnection) {
               // Student reconnected - update clientId and presence
-              console.log('🔄 Student reconnected:', existingStudent.clientId, '→', incomingClientId, '(', studentName, ')');
+              console.log('🔄 Student reconnected:', existingStudent?.clientId || 'N/A', '→', incomingClientId, '(', studentName, ')');
+
+              // Show rejoined toast
+              showToast(`${studentName} rejoined`, 'success');
 
               // Update selectedStudent if teacher has modal open with this student
               if (selectedStudent?.studentId === incomingStudentId) {
@@ -596,7 +576,8 @@ const TeacherDashboard = () => {
               }
 
               const updatedStudent = {
-                ...existingStudent,           // Preserve all state (flags, etc.)
+                ...(existingStudent || {}),   // Preserve all state (flags, etc.) if exists
+                studentId: incomingStudentId,
                 clientId: incomingClientId,  // Update to new clientId for Ably delivery
                 name: studentName,
                 isActive: true,
@@ -614,7 +595,7 @@ const TeacherDashboard = () => {
 
             // New student - show join toast only once per session
             // (Also handles case where student exists but has undefined clientId due to race condition)
-            const isFirstJoin = !joinedStudentsRef.current.has(incomingStudentId);
+            const isFirstJoin = !hasJoinedBefore;
             
             if (isFirstJoin) {
               joinedStudentsRef.current.add(incomingStudentId);
@@ -785,6 +766,63 @@ const TeacherDashboard = () => {
           }, 100);
         });
 
+        // Handle student request for teacher annotations (after student refresh)
+        whiteboardChannel.subscribe('request-teacher-annotations', async (message) => {
+          const requestingStudentId = message.data?.studentId;
+          const requestingClientId = message.data?.clientId;
+
+          console.log(`📨 Received annotation request from student ${requestingStudentId}`);
+
+          // Load annotations from IndexedDB for this student
+          try {
+            const { loadAllTeacherAnnotations } = await import('../utils/indexedDB');
+            const allAnnotations = await loadAllTeacherAnnotations(roomId, 'teacher');
+            const annotations = allAnnotations[requestingStudentId] || [];
+
+            console.log(`📤 Sending ${annotations.length} teacher annotations to student ${requestingStudentId}`);
+
+            // Send annotations back to requesting student
+            setTimeout(() => {
+              if (whiteboardChannel && whiteboardChannel.state === 'attached') {
+                whiteboardChannel.publish('response-teacher-annotations', {
+                  targetStudentId: requestingStudentId,
+                  targetClientId: requestingClientId,
+                  annotations: annotations,
+                  timestamp: Date.now(),
+                });
+              }
+            }, 100);
+          } catch (error) {
+            console.error('❌ Error loading annotations from IndexedDB:', error);
+          }
+        });
+
+        // Handle student response with their strokes (after teacher reconnect)
+        whiteboardChannel.subscribe('response-student-strokes', (message) => {
+          const studentId = message.data?.studentId;
+          const studentLines = message.data?.strokes || [];
+          const studentName = message.data?.studentName;
+
+          console.log(`📨 Received ${studentLines.length} strokes from student ${studentName} (${studentId})`);
+
+          if (studentId && studentLines.length > 0) {
+            // Update the student's strokes in the dashboard
+            setStudents(prevStudents => {
+              const existing = prevStudents[studentId];
+              if (existing) {
+                return {
+                  ...prevStudents,
+                  [studentId]: {
+                    ...existing,
+                    lines: studentLines,
+                  }
+                };
+              }
+              return prevStudents;
+            });
+          }
+        });
+
         // Enter presence with teacher role
         await whiteboardChannel.presence.enter({
           role: 'teacher',
@@ -866,106 +904,57 @@ const TeacherDashboard = () => {
         });
         
         if (isPageRefresh) {
+          // Set loading state
+          setIsLoadingData(true);
+
           setTimeout(async () => {
             try {
-              console.log('🔄 Page refresh detected - loading from IndexedDB + Redis...');
-              
+              console.log('🔄 Page refresh detected - loading teacher annotations from IndexedDB...');
+
               // Initialize IndexedDB
               await initDB();
               console.log('✅ IndexedDB initialized for teacher');
-              
+
               // Validate session - clear IndexedDB if session changed
               const isValidSession = await validateSession(roomId, clientId, 'teacher', sessionId);
-              
+
               if (!isValidSession) {
                 console.log('⚠️ Session changed - IndexedDB was cleared for teacher');
               }
-              
-              // Load teacher annotations from both IndexedDB and Redis
-              let teacherAnnotationsFromIndexedDB = {};
-              let teacherAnnotationsFromRedis = {};
-              
-              // 1) Load ALL teacher annotations from IndexedDB first (primary source)
+
+              // Load teacher annotations from IndexedDB only
               if (isValidSession) {
                 console.log('📂 Loading all teacher annotations from IndexedDB...');
-                teacherAnnotationsFromIndexedDB = await loadAllTeacherAnnotations(roomId);
-                
+                const teacherAnnotationsFromIndexedDB = await loadAllTeacherAnnotations(roomId);
+
                 if (Object.keys(teacherAnnotationsFromIndexedDB).length > 0) {
                   console.log(`✅ Loaded teacher annotations from IndexedDB for ${Object.keys(teacherAnnotationsFromIndexedDB).length} students`);
+                  setTeacherAnnotations(teacherAnnotationsFromIndexedDB);
                 } else {
                   console.log('ℹ️ No teacher annotations found in IndexedDB');
                 }
               }
-              
-              // 2) Load teacher annotations from Redis (backup/fallback)
-              const teacherResponse = await fetch(`/api/strokes/load?roomId=${roomId}&party=teacher`);
-              if (teacherResponse.ok) {
-                const teacherData = await teacherResponse.json();
-                if (teacherData.annotations && Object.keys(teacherData.annotations).length > 0) {
-                  console.log(`✅ Loaded teacher annotations from Redis for ${Object.keys(teacherData.annotations).length} students`);
-                  teacherAnnotationsFromRedis = teacherData.annotations;
-                } else {
-                  console.log('ℹ️ No teacher annotations found in Redis');
-                }
-              }
-              
-              // 3) Merge: Start with Redis (older), then overwrite with IndexedDB (newer/most recent)
-              const mergedAnnotations = {
-                ...teacherAnnotationsFromRedis,
-                ...teacherAnnotationsFromIndexedDB
-              };
-              
-              // 4) Restore to UI
-              if (Object.keys(mergedAnnotations).length > 0) {
-                setTeacherAnnotations(mergedAnnotations);
-                console.log(`✅ Restored teacher annotations for ${Object.keys(mergedAnnotations).length} students total`);
-                console.log(`   - ${Object.keys(teacherAnnotationsFromIndexedDB).length} from IndexedDB (primary)`);
-                console.log(`   - ${Object.keys(teacherAnnotationsFromRedis).length} from Redis (fallback)`);
-              } else {
-                console.log('ℹ️ No teacher annotations to restore');
-              }
 
-              // Load all students' strokes from Redis
-              const response = await fetch(`/api/strokes/load?roomId=${roomId}&party=students`);
-              
-              if (response.ok) {
-                const data = await response.json();
-                
-                if (data.students && Object.keys(data.students).length > 0) {
-                  console.log(`✅ Restored ${Object.keys(data.students).length} students' data from Redis after refresh`);
-                  
-                  // Merge Redis student data with current state
-                  setStudents(prev => {
-                    const updated = { ...prev };
-                    
-                    Object.entries(data.students).forEach(([studentId, redisData]) => {
-                      if (updated[studentId]) {
-                        // Student exists, merge the strokes
-                        updated[studentId] = {
-                          ...updated[studentId],
-                          lines: redisData.strokes || [],
-                        };
-                      } else {
-                        // Student doesn't exist yet (they might have disconnected)
-                        updated[studentId] = {
-                          studentId,
-                          clientId: undefined, // Will be filled when they reconnect
-                          name: redisData.meta?.name || 'Unknown',
-                          lines: redisData.strokes || [],
-                          isActive: false,
-                          lastUpdate: Date.now(),
-                        };
-                      }
-                    });
-                    
-                    return updated;
+              // Request strokes from all connected students after page refresh
+              setTimeout(() => {
+                if (whiteboardChannel && whiteboardChannel.state === 'attached') {
+                  console.log('📤 Broadcasting request for student strokes after page refresh');
+                  whiteboardChannel.publish('request-student-strokes', {
+                    timestamp: Date.now(),
                   });
-                } else {
-                  console.log('ℹ️ No student data found in Redis');
+
+                  // Clear loading state after request is sent (students will populate gradually)
+                  setTimeout(() => {
+                    setIsLoadingData(false);
+                  }, 500);
                 }
-              }
+              }, 1200); // Give students time to connect and be ready
+
+              // Student strokes will be received via Ably when students respond to request
+              console.log('ℹ️ Student strokes will be requested from all connected students via Ably');
             } catch (error) {
               console.error('Error loading strokes on refresh:', error);
+              setIsLoadingData(false); // Clear loading state on error
             }
           }, 1000); // Small delay to ensure channel is fully set up
         } else {
@@ -1344,17 +1333,30 @@ const TeacherDashboard = () => {
       // STEP 1: Persist current question data to Supabase (if there's data to save)
       if (currentQuestionNumber > 0) {
         console.log(`💾 Persisting question ${currentQuestionNumber} before moving to next...`);
-        
+
         try {
+          // Aggregate data from current state (students + teacher annotations)
+          const studentsData = {};
+
+          for (const [studentId, student] of Object.entries(students)) {
+            studentsData[studentId] = {
+              studentLines: student.lines || [],
+              teacherAnnotations: teacherAnnotations[studentId] || [],
+              studentName: student.name || 'Unknown Student',
+            };
+          }
+
+          console.log(`📊 Aggregated data for ${Object.keys(studentsData).length} students`);
+
           const response = await fetch('/api/strokes/persist', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              roomId,
               sessionId,
               questionNumber: currentQuestionNumber,
               contentType: sharedImage?.type ? 'template' : (sharedImage ? 'image' : 'blank'),
               content: sharedImage,
+              studentsData: studentsData,
             }),
           });
 
@@ -1859,7 +1861,17 @@ const TeacherDashboard = () => {
               <button
                 type="button"
                 className={`chip-button ${flagFilter === 'flagged' ? 'active' : ''}`}
-                onClick={() => setFlagFilter(prev => (prev === 'flagged' ? 'all' : 'flagged'))}
+                onClick={() => {
+                  setFlagFilter(prev => {
+                    const newValue = prev === 'flagged' ? 'all' : 'flagged';
+                    // When enabling "Flagged only", automatically hide names
+                    if (newValue === 'flagged') {
+                      setHideNames(true);
+                    }
+                    // When disabling "Flagged only", keep hideNames as is (don't change it)
+                    return newValue;
+                  });
+                }}
               >
                 Flagged only
               </button>
@@ -1890,6 +1902,12 @@ const TeacherDashboard = () => {
 
         <section className="students-panel">
           <div className="students-surface glass-panel">
+            {isLoadingData && (
+              <div className="loading-overlay">
+                <div className="loading-spinner"></div>
+                <p>Loading student data...</p>
+              </div>
+            )}
             {studentsList.length === 0 ? (
               <div className="waiting-card">
                 <div className="waiting-icon" aria-hidden="true">👥</div>

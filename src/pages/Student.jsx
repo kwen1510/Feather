@@ -122,6 +122,7 @@ function Student() {
   const [toolbarPosition, setToolbarPosition] = useState('left'); // 'left' or 'right'
   const [isMobile, setIsMobile] = useState(isMobileDevice());
   const visibilityListenerAttached = useRef(false);
+  const [isLoadingData, setIsLoadingData] = useState(false); // Loading state during page refresh
 
   // Redirect to login if missing name or room - DO THIS FIRST before any initialization
   useEffect(() => {
@@ -268,66 +269,7 @@ function Student() {
     }
   }, [studentLines, channel, clientId, studentId, canvasSize, canvasScale]);
 
-  // Track last saved stroke IDs to avoid unnecessary Redis writes
-  const lastSavedStrokeIds = useRef(new Set());
-
-  // Auto-save student strokes to Redis (debounced, only saves new strokes since last save)
-  useEffect(() => {
-    if (!roomId || !studentId || !studentName) return;
-
-    const timer = setTimeout(async () => {
-      try {
-        // Find strokes not yet saved
-        const newStrokes = studentLines.filter(
-          line => line.strokeId && !lastSavedStrokeIds.current.has(line.strokeId)
-        );
-
-        if (newStrokes.length === 0) {
-          return; // No new strokes, skip save
-        }
-
-        await fetch('/api/strokes/save', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            roomId,
-            party: 'student',
-            studentId,
-            studentName,
-            strokes: newStrokes,
-          }),
-        });
-
-        // Mark strokes as saved
-        newStrokes.forEach(stroke => lastSavedStrokeIds.current.add(stroke.strokeId));
-        console.log(`💾 Saved ${newStrokes.length} new student strokes to Redis`);
-      } catch (error) {
-        console.error('Error auto-saving strokes to Redis:', error);
-      }
-    }, 3000); // 3 second debounce
-
-    return () => clearTimeout(timer);
-  }, [studentLines, roomId, studentId, studentName]);
-
-  // Save strokes on page unload (for closing tab or refresh)
-  useEffect(() => {
-    if (!roomId || !studentId || !studentName) return;
-
-    const handleBeforeUnload = () => {
-      // Use sendBeacon for reliable last-second save
-      const data = JSON.stringify({
-        roomId,
-        studentId,
-        lines: studentLines,
-        studentName,
-      });
-      
-      navigator.sendBeacon('/api/strokes/save', data);
-    };
-
-    window.addEventListener('beforeunload', handleBeforeUnload);
-    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-  }, [studentLines, roomId, studentId, studentName]);
+  // Redis auto-save removed - now using IndexedDB + Ably recovery only
 
   // Cleanup animation frame on unmount
   useEffect(() => {
@@ -626,6 +568,50 @@ function Student() {
           navigate('/student-login');
         });
 
+        // Listen for teacher annotation recovery response (when student requests after refresh)
+        subscribe('response-teacher-annotations', (message) => {
+          if (!isActive) return;
+          if (message.data.targetStudentId === studentId || message.data.targetClientId === clientId) {
+            const annotations = message.data.annotations || [];
+            console.log(`📨 Received ${annotations.length} teacher annotations from recovery request`);
+
+            if (annotations.length > 0) {
+              isRemoteUpdate.current = true;
+              setTeacherLines(annotations);
+              setTimeout(() => {
+                isRemoteUpdate.current = false;
+              }, 100);
+            }
+          }
+        });
+
+        // Listen for teacher request for student strokes (after teacher reconnects)
+        subscribe('request-student-strokes', async (message) => {
+          if (!isActive) return;
+          console.log('📨 Teacher requested student strokes - loading from IndexedDB');
+
+          try {
+            // Load own strokes from IndexedDB
+            const ownStrokes = await loadStrokesFromIndexedDB(roomId, studentId, 'student');
+            console.log(`📤 Sending ${ownStrokes.length} strokes to teacher`);
+
+            // Send strokes back to teacher
+            setTimeout(() => {
+              if (whiteboardChannel && whiteboardChannel.state === 'attached') {
+                whiteboardChannel.publish('response-student-strokes', {
+                  studentId: studentId,
+                  studentName: studentName,
+                  strokes: ownStrokes,
+                  timestamp: Date.now(),
+                });
+                console.log(`✅ Sent ${ownStrokes.length} strokes to teacher`);
+              }
+            }, 200);
+          } catch (error) {
+            console.error('❌ Error loading strokes from IndexedDB:', error);
+          }
+        });
+
         // Enter presence with student name and initial visibility status
         await whiteboardChannel.presence.enter({
           name: studentName || 'Anonymous',
@@ -669,6 +655,9 @@ function Student() {
         });
 
         if (isPageRefresh) {
+          // Set loading state
+          setIsLoadingData(true);
+
           setTimeout(async () => {
             if (!isActive) return;
 
@@ -684,6 +673,7 @@ function Student() {
 
               if (!isValidSession) {
                 console.log('⚠️ Session changed - IndexedDB was cleared, starting fresh');
+                setIsLoadingData(false); // Clear loading state
                 // Don't load strokes, they were cleared
               } else {
                 // 3) indexDB strokes loaded
@@ -711,33 +701,30 @@ function Student() {
                         },
                       });
                       console.log(`📤 Re-published ${ownStrokes.length} strokes to teacher after rejoin`);
+                      
+                      // Clear loading state after publishing
+                      setIsLoadingData(false);
                     }
                   }, 200); // After isRemoteUpdate is reset
                 } else {
                   console.log('ℹ️ No strokes found in IndexedDB');
+                  setIsLoadingData(false); // Clear loading state
                 }
               }
 
-              // Load teacher annotations from Redis (specific to this student)
-              const response = await fetch(`/api/strokes/load?roomId=${roomId}&party=teacher`);
-              if (response.ok) {
-                const data = await response.json();
-                // Extract annotations for this specific student
-                const myAnnotations = data.annotations?.[studentId] || [];
-                if (myAnnotations.length > 0) {
-                  console.log(`✅ Loaded ${myAnnotations.length} teacher annotations for this student from Redis`);
-                  // Set teacher annotations from Redis
-                  isRemoteUpdate.current = true;
-                  setTeacherLines(myAnnotations);
-                  setTimeout(() => {
-                    isRemoteUpdate.current = false;
-                  }, 100);
-                } else {
-                  console.log('ℹ️ No teacher annotations found for this student in Redis');
-                }
+              // Request teacher annotations via Ably (teacher will load from IndexedDB and respond)
+              console.log('📤 Requesting teacher annotations via Ably...');
+              if (whiteboardChannel && isActive) {
+                whiteboardChannel.publish('request-teacher-annotations', {
+                  studentId: studentId,
+                  clientId: clientId,
+                  timestamp: Date.now(),
+                });
+                console.log('✅ Sent request for teacher annotations');
               }
             } catch (error) {
               console.error('Error loading strokes on refresh:', error);
+              setIsLoadingData(false); // Clear loading state on error
             }
           }, 700); // Slightly after requesting current state
         } else {
@@ -1409,6 +1396,12 @@ function Student() {
           {/* Canvas */}
           <div className="student-canvas-panel" ref={canvasWrapperRef}>
             <div className="student-canvas-frame">
+              {isLoadingData && (
+                <div className="canvas-loading-overlay">
+                  <div className="loading-spinner"></div>
+                  <p>Loading your work...</p>
+                </div>
+              )}
               <div
                 className="student-canvas-surface"
                 style={{ width: `${canvasSize.width}px`, height: `${canvasSize.height}px` }}
