@@ -15,6 +15,7 @@
     "@supabase/supabase-js": "^2.76.1",
     "ably": "^1.2.46",
     "dotenv": "^17.2.3",
+    "heic2any": "^0.0.4",
     "konva": "^10.0.7",
     "lucide-react": "^0.548.0",
     "primeicons": "^7.0.0",

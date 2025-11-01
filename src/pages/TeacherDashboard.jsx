@@ -104,6 +104,7 @@ const TeacherDashboard = () => {
   const [sharedImage, setSharedImage] = useState(null); // Shared image sent to all students
   const sharedImageRef = useRef(null); // Ref to access latest sharedImage in callbacks
   const teacherAnnotationsRef = useRef({}); // Ref to access latest teacherAnnotations in callbacks
+  const studentsRef = useRef({}); // Ref to access latest students in callbacks
   const logoutTimerRef = useRef(null);
   const imageInputRef = useRef(null);
   const linkInputRef = useRef(null); // Ref for the student link input field
@@ -151,10 +152,14 @@ const TeacherDashboard = () => {
     }
   }, [sharedImage, roomId]);
 
-  // Keep ref updated with latest teacherAnnotations
+  // Keep refs updated with latest state
   useEffect(() => {
     teacherAnnotationsRef.current = teacherAnnotations;
   }, [teacherAnnotations]);
+
+  useEffect(() => {
+    studentsRef.current = students;
+  }, [students]);
 
   // Toast notification helper
   const toastIdCounter = useRef(0);
@@ -178,13 +183,15 @@ const TeacherDashboard = () => {
         console.log(`💾 Saving final question ${currentQuestionNumber} before ending session...`);
 
         try {
-          // Aggregate data from current state (students + teacher annotations)
+          // Aggregate data from REFS (to get latest state, not stale callback state)
           const studentsData = {};
+          const currentStudents = studentsRef.current;
+          const currentTeacherAnnotations = teacherAnnotationsRef.current;
 
-          for (const [studentId, student] of Object.entries(students)) {
+          for (const [studentId, student] of Object.entries(currentStudents)) {
             studentsData[studentId] = {
               studentLines: student.lines || [],
-              teacherAnnotations: teacherAnnotations[studentId] || [],
+              teacherAnnotations: currentTeacherAnnotations[studentId] || [],
               studentName: student.name || 'Unknown Student',
               clientId: student.clientId || null,
             };
@@ -1195,17 +1202,23 @@ const TeacherDashboard = () => {
       // Create detailed error message
       let detailedError = `❌ Upload failed: ${error.message || 'Unknown error'}\n`;
       detailedError += `File: ${file.name} (${file.type})\n`;
-      detailedError += `Size: ${fileSizeMB}MB\n`;
+      detailedError += `Size: ${fileSizeMB}MB\n\n`;
 
       // Check for specific error types
-      if (error.message?.includes('load')) {
+      if (error.message?.includes('HEIC') || error.message?.includes('heic')) {
+        detailedError += 'HEIC conversion failed. This can happen with some iPad photos.\n';
+        detailedError += 'Try: Taking a screenshot of the photo, or using a different image format.';
+      } else if (error.message?.includes('still too large') || error.message?.includes('limit')) {
+        detailedError += 'Image is too large even after compression.\n';
+        detailedError += 'Try: Using a smaller image, cropping the photo, or taking a new photo closer to the subject.';
+      } else if (error.message?.includes('load')) {
         detailedError += 'Error loading image. The file may be corrupted or in an unsupported format.';
       } else if (error.message?.includes('compress')) {
         detailedError += 'Error compressing image. Try a different image or smaller file.';
       } else if (error.message?.includes('memory') || error.message?.includes('allocation')) {
         detailedError += 'Image too large for device memory. Try a smaller image.';
       } else {
-        detailedError += 'Try a different image or format (JPG/PNG recommended).';
+        detailedError += 'Try a different image or format (JPG/PNG recommended, HEIC also supported).';
       }
 
       setImageMessage(detailedError);
@@ -1396,13 +1409,15 @@ const TeacherDashboard = () => {
         console.log(`💾 Persisting question ${currentQuestionNumber} before moving to next...`);
 
         try {
-          // Aggregate data from current state (students + teacher annotations)
+          // Aggregate data from REFS (to ensure we get latest state)
           const studentsData = {};
+          const currentStudents = studentsRef.current;
+          const currentTeacherAnnotations = teacherAnnotationsRef.current;
 
-          for (const [studentId, student] of Object.entries(students)) {
+          for (const [studentId, student] of Object.entries(currentStudents)) {
             studentsData[studentId] = {
               studentLines: student.lines || [],
-              teacherAnnotations: teacherAnnotations[studentId] || [],
+              teacherAnnotations: currentTeacherAnnotations[studentId] || [],
               studentName: student.name || 'Unknown Student',
               clientId: student.clientId || null,
             };
@@ -1496,6 +1511,7 @@ const TeacherDashboard = () => {
       });
       const currentAnnotations = teacherAnnotationsRef.current;
       setTeacherAnnotations({}); // Clear all teacher annotations
+      setSelectedStudent(null); // Close annotation modal and clear selected student
 
       // Clear IndexedDB for teacher's annotations for each student
       try {
