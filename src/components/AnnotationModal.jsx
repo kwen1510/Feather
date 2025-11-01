@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Stage, Layer, Line, Image as KonvaImage } from 'react-konva';
-import { Pen, Eraser, Undo, Redo, Trash2 } from 'lucide-react';
+import { Pen, Eraser, Undo, Redo, Trash2, Pointer } from 'lucide-react';
 import FlagIcon from './FlagIcon';
 import './AnnotationModal.css';
 
@@ -29,7 +29,7 @@ const AnnotationModal = ({
   const [brushSize, setBrushSize] = useState(3);
   const [isDrawing, setIsDrawing] = useState(false);
   const [teacherAnnotations, setTeacherAnnotations] = useState([]);
-  const [inputMode, setInputMode] = useState('stylus-only');
+  const [inputMode, setInputMode] = useState('all'); // Changed from 'stylus-only' to allow mouse/touch by default
   const [toolbarPosition, setToolbarPosition] = useState('left');
   const [image, setImage] = useState(null);
   const [isMobile, setIsMobile] = useState(false);
@@ -559,6 +559,14 @@ const AnnotationModal = ({
                     aria-label="Eraser"
                   >
                     <Eraser size={20} />
+                  </button>
+                  <button
+                    onClick={toggleInputMode}
+                    className={`mobile-tool-button ${inputMode === 'all' ? 'active' : ''}`}
+                    aria-label={inputMode === 'stylus-only' ? 'Stylus only' : 'All inputs'}
+                    title={inputMode === 'stylus-only' ? 'Stylus only' : 'All inputs'}
+                  >
+                    <Pointer size={20} />
                   </button>
                   <button
                     onClick={handleUndo}

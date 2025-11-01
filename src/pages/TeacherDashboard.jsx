@@ -50,6 +50,7 @@ const TeacherDashboard = () => {
   // Supabase session tracking (validation only)
   const [sessionId, setSessionId] = useState(null);
   const [sessionStatus, setSessionStatus] = useState('created'); // 'created' | 'active' | 'ended'
+  const [isNewSession, setIsNewSession] = useState(false); // Track if session is newly created with no students
 
   // Ably connection
   const [ably, setAbly] = useState(null);
@@ -373,6 +374,11 @@ const TeacherDashboard = () => {
           setSessionId(session.id);
           setSessionStatus(session.status);
 
+          // Detect if this is a new session (status 'created' with no students connected yet)
+          const isFirstSession = session.status === 'created' && !session.started_at;
+          setIsNewSession(isFirstSession);
+          console.log(`🔍 Session detection: isNewSession=${isFirstSession}, status=${session.status}, started_at=${session.started_at}`);
+
           if (!cancelled) {
             sessionInitStateRef.current = { roomId, status: 'done' };
           }
@@ -490,13 +496,30 @@ const TeacherDashboard = () => {
                 timestamp: Date.now()
               });
 
-              // Broadcast request for student strokes
-              setTimeout(() => {
+              // Broadcast request for student strokes (check connected students)
+              setTimeout(async () => {
                 if (whiteboardChannel && whiteboardChannel.state === 'attached') {
-                  console.log('📤 Broadcasting request for student strokes');
-                  whiteboardChannel.publish('request-student-strokes', {
-                    timestamp: Date.now(),
-                  });
+                  // Check number of connected students before requesting strokes
+                  const connectedMembers = await whiteboardChannel.presence.get();
+                  const connectedStudents = connectedMembers.filter(member =>
+                    member.clientId &&
+                    member.clientId !== clientId &&
+                    member.clientId.includes('student')
+                  );
+                  const studentCount = connectedStudents.length;
+
+                  if (studentCount === 0) {
+                    // No students connected - skip stroke request entirely
+                    console.log('ℹ️ No students connected - skipping stroke request on reconnection');
+                  } else {
+                    // 1+ students connected - show toast and request strokes
+                    console.log(`📤 Broadcasting request for strokes from ${studentCount} student(s)`);
+                    showToast('Restoring saved state', 'info');
+
+                    whiteboardChannel.publish('request-student-strokes', {
+                      timestamp: Date.now(),
+                    });
+                  }
                 }
               }, 500);
 
@@ -931,11 +954,8 @@ const TeacherDashboard = () => {
           navType: navEntry?.type,
           isPageRefresh,
         });
-        
-        if (isPageRefresh) {
-          // Set loading state
-          setIsLoadingData(true);
 
+        if (isPageRefresh) {
           setTimeout(async () => {
             try {
               console.log('🔄 Page refresh detected - loading teacher annotations from IndexedDB...');
@@ -965,17 +985,29 @@ const TeacherDashboard = () => {
               }
 
               // Request strokes from all connected students after page refresh
-              setTimeout(() => {
+              setTimeout(async () => {
                 if (whiteboardChannel && whiteboardChannel.state === 'attached') {
-                  console.log('📤 Broadcasting request for student strokes after page refresh');
-                  whiteboardChannel.publish('request-student-strokes', {
-                    timestamp: Date.now(),
-                  });
+                  // Check number of connected students before requesting strokes
+                  const connectedMembers = await whiteboardChannel.presence.get();
+                  const connectedStudents = connectedMembers.filter(member =>
+                    member.clientId &&
+                    member.clientId !== clientId &&
+                    member.clientId.includes('student')
+                  );
+                  const studentCount = connectedStudents.length;
 
-                  // Clear loading state after request is sent (students will populate gradually)
-                  setTimeout(() => {
-                    setIsLoadingData(false);
-                  }, 500);
+                  if (studentCount === 0) {
+                    // No students connected - skip stroke request entirely
+                    console.log('ℹ️ No students connected - skipping stroke request');
+                  } else {
+                    // 1+ students connected - show toast and request strokes
+                    console.log(`📤 Broadcasting request for strokes from ${studentCount} student(s)`);
+                    showToast('Restoring saved state', 'info');
+
+                    whiteboardChannel.publish('request-student-strokes', {
+                      timestamp: Date.now(),
+                    });
+                  }
                 }
               }, 1200); // Give students time to connect and be ready
 
@@ -983,7 +1015,6 @@ const TeacherDashboard = () => {
               console.log('ℹ️ Student strokes will be requested from all connected students via Ably');
             } catch (error) {
               console.error('Error loading strokes on refresh:', error);
-              setIsLoadingData(false); // Clear loading state on error
             }
           }, 1000); // Small delay to ensure channel is fully set up
         } else {
@@ -1426,6 +1457,7 @@ const TeacherDashboard = () => {
         }
 
         setSessionStatus('active');
+        setIsNewSession(false); // Session is no longer new once it's started
 
         // Publish session-started event
         await channel.publish('session-started', {

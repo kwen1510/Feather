@@ -3,7 +3,7 @@ import { useSearchParams, useNavigate } from 'react-router-dom';
 import { Stage, Layer, Line, Image as KonvaImage } from 'react-konva';
 import * as Ably from 'ably';
 import { supabase } from '../supabaseClient';
-import { Pen, Eraser, Undo, Redo, Trash2 } from 'lucide-react';
+import { Pen, Eraser, Undo, Redo, Trash2, Pointer } from 'lucide-react';
 import { getOrCreateStudentId } from '../utils/identity';
 import { initDB, saveStroke as saveStrokeToIndexedDB, loadStrokes as loadStrokesFromIndexedDB, clearStrokes as clearStrokesFromIndexedDB, validateSession, replaceAllStrokes as replaceAllStrokesInIndexedDB } from '../utils/indexedDB';
 import './StudentNew.css';
@@ -189,10 +189,9 @@ function Student() {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  // Set input mode to 'all' on mobile devices
+  // Set fixed brush size for mobile devices
   useEffect(() => {
     if (isMobile) {
-      setInputMode('all');
       setBrushSize(3); // Fixed brush size for mobile
     }
   }, [isMobile]);
@@ -1262,6 +1261,14 @@ function Student() {
                   aria-label="Eraser"
                 >
                   <Eraser size={20} />
+                </button>
+                <button
+                  onClick={toggleInputMode}
+                  className={`mobile-tool-button ${inputMode === 'all' ? 'active' : ''}`}
+                  aria-label={inputMode === 'stylus-only' ? 'Stylus mode (pen only)' : 'All inputs'}
+                  title={inputMode === 'stylus-only' ? 'Stylus mode (pen only)' : 'All inputs'}
+                >
+                  <Pointer size={20} />
                 </button>
                 <button
                   onClick={handleUndo}
