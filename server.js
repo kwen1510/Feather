@@ -56,6 +56,22 @@ async function getOrCreateParticipant(sessionId, studentId, name, role) {
     }
 
     if (existing) {
+      if (name && existing.name !== name) {
+        const { data: updated, error: updateError } = await supabase
+          .from('participants')
+          .update({ name })
+          .eq('id', existing.id)
+          .select()
+          .single();
+
+        if (updateError) {
+          console.error('Error updating participant name:', updateError);
+          return existing;
+        }
+
+        return updated;
+      }
+
       return existing;
     }
 
@@ -67,7 +83,7 @@ async function getOrCreateParticipant(sessionId, studentId, name, role) {
         client_id: `${role}-${Date.now()}`,
         student_id: studentId,
         role: role,
-        student_name: name,
+        name: name,
       }])
       .select()
       .single();

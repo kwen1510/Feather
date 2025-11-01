@@ -26,8 +26,9 @@ CREATE TABLE IF NOT EXISTS participants (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   session_id UUID NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
   client_id TEXT NOT NULL,
+  student_id TEXT,
   role TEXT NOT NULL CHECK (role IN ('teacher', 'student')),
-  student_name TEXT,
+  name TEXT,
   is_flagged BOOLEAN DEFAULT FALSE,
   joined_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   left_at TIMESTAMP WITH TIME ZONE
@@ -36,6 +37,7 @@ CREATE TABLE IF NOT EXISTS participants (
 -- Create indexes for faster queries
 CREATE INDEX IF NOT EXISTS idx_participants_session_id ON participants(session_id);
 CREATE INDEX IF NOT EXISTS idx_participants_client_id ON participants(client_id);
+CREATE INDEX IF NOT EXISTS idx_participants_student_id ON participants(student_id);
 
 -- Questions Table
 -- Tracks each piece of content (blank/template/image) sent by teacher

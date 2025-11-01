@@ -302,11 +302,10 @@ const AnnotationModal = ({
   const handlePointerDown = (e) => {
     const evt = e.evt;
 
-    // Prevent default and stop propagation to avoid scrolling
-    if (evt?.preventDefault) evt.preventDefault();
-    if (evt?.stopPropagation) evt.stopPropagation();
-
     if (!isAllowedPointerEvent(evt)) {
+      if (evt?.preventDefault) {
+        evt.preventDefault();
+      }
       return;
     }
 
@@ -344,17 +343,24 @@ const AnnotationModal = ({
       setIsDrawing(true);
       eraserStateSaved.current = false;
     }
+
+    if (evt.preventDefault) {
+      evt.preventDefault();
+    }
+    if (evt.stopPropagation) {
+      evt.stopPropagation();
+    }
   };
 
   const handlePointerMove = (e) => {
-    // Prevent default and stop propagation first
-    const evt = e.evt;
-    if (evt?.preventDefault) evt.preventDefault();
-    if (evt?.stopPropagation) evt.stopPropagation();
-
     if (!isDrawing) return;
 
+    const evt = e.evt;
+
     if (!isAllowedPointerEvent(evt)) {
+      if (evt?.preventDefault) {
+        evt.preventDefault();
+      }
       return;
     }
 
@@ -362,6 +368,13 @@ const AnnotationModal = ({
     const point = stage.getPointerPosition();
 
     if (tool === 'pen') {
+      // Prevent scrolling/zooming once we're actively drawing
+      if (evt?.preventDefault) {
+        evt.preventDefault();
+      }
+      if (evt?.stopPropagation) {
+        evt.stopPropagation();
+      }
       // Performance optimization: directly mutate points array in ref
       if (currentLineRef.current) {
         const { x, y } = normalizePoint(point);
@@ -386,6 +399,14 @@ const AnnotationModal = ({
         });
       }
     } else if (tool === 'eraser') {
+      // Prevent scrolling/zooming while erasing
+      if (evt?.preventDefault) {
+        evt.preventDefault();
+      }
+      if (evt?.stopPropagation) {
+        evt.stopPropagation();
+      }
+      
       const previousLength = teacherAnnotations.length;
       const eraserRadius = 20;
       const linesToKeep = teacherAnnotations.filter((line) => {
