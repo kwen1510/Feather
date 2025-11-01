@@ -3,7 +3,7 @@ import { useSearchParams, useNavigate } from 'react-router-dom';
 import { Stage, Layer, Line, Image as KonvaImage } from 'react-konva';
 import * as Ably from 'ably';
 import { supabase } from '../supabaseClient';
-import { Pen, Eraser, Undo, Redo, Trash2, Pointer } from 'lucide-react';
+import { Pen, Eraser, Undo, Redo, Trash2, Pointer, Feather } from 'lucide-react';
 import { getOrCreateStudentId } from '../utils/identity';
 import { initDB, saveStroke as saveStrokeToIndexedDB, loadStrokes as loadStrokesFromIndexedDB, clearStrokes as clearStrokesFromIndexedDB, validateSession, replaceAllStrokes as replaceAllStrokesInIndexedDB } from '../utils/indexedDB';
 import './StudentNew.css';
@@ -1213,21 +1213,16 @@ function Student() {
       <div className="student-canvas-container">
         <div className="student-status-bar">
           <div className="student-status-text">
-            <h1>
-              Student Canvas
-              {roomId && (
-                <span style={{
-                  marginLeft: '0.75rem',
-                  fontSize: '0.75rem',
-                  fontWeight: '400',
-                  color: 'rgba(0, 0, 0, 0.4)',
-                  letterSpacing: '0.5px'
-                }}>
-                  Session: {roomId}
-                </span>
-              )}
-            </h1>
-            <p>{formatClientLabel()}</p>
+            <div className="feather-branding">
+              <Feather size={28} strokeWidth={2} />
+              <span>Feather</span>
+            </div>
+            {roomId && (
+              <span className="session-info">
+                Session: {roomId}
+              </span>
+            )}
+            <span className="student-info">{formatClientLabel()}</span>
           </div>
           <div className="student-status-actions">
             {!isMobile && (

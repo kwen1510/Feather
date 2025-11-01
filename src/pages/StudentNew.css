@@ -42,16 +42,45 @@
   width: 100%;
 }
 
-.student-status-text h1 {
-  margin: 0;
-  font-size: 1.35rem;
-  font-weight: 700;
-  color: #0f1828;
+.student-status-text {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
 }
 
-.student-status-text p {
-  margin: 0.15rem 0 0;
-  font-size: 0.9rem;
+.student-status-text .feather-branding {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.65rem;
+  font-size: 1.25rem;
+  font-weight: 700;
+}
+
+.student-status-text .feather-branding svg {
+  color: #059669;
+  stroke-width: 2;
+  filter: drop-shadow(0 1px 2px rgba(5, 150, 105, 0.3));
+}
+
+.student-status-text .feather-branding span {
+  background: linear-gradient(135deg, #059669 0%, #065f46 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.student-status-text .session-info {
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: rgba(0, 0, 0, 0.5);
+  padding-left: 1rem;
+  border-left: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+.student-status-text .student-info {
+  font-size: 0.85rem;
+  font-weight: 500;
   color: #7f8a96;
 }
 
@@ -562,8 +591,13 @@
     font-size: 0.75rem;
   }
 
-  .student-status-text h1 {
-    font-size: 1.2rem;
+  .student-status-text .feather-branding {
+    font-size: 1.15rem;
+  }
+
+  .student-status-text .session-info,
+  .student-status-text .student-info {
+    font-size: 0.8rem;
   }
 
   .student-status-actions {
@@ -659,11 +693,12 @@
     gap: 0.5rem;
   }
 
-  .student-status-text h1 {
-    font-size: 1.1rem;
+  .student-status-text .feather-branding {
+    font-size: 1.15rem;
   }
 
-  .student-status-text p {
+  .student-status-text .session-info,
+  .student-status-text .student-info {
     font-size: 0.8rem;
   }
 
@@ -732,11 +767,23 @@
     gap: 0.5rem;
   }
 
-  .student-status-text h1 {
-    font-size: 1rem;
+  .student-status-text {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
   }
 
-  .student-status-text p {
+  .student-status-text .feather-branding {
+    font-size: 1.15rem;
+  }
+
+  .student-status-text .session-info {
+    padding-left: 0;
+    border-left: none;
+    font-size: 0.75rem;
+  }
+
+  .student-status-text .student-info {
     font-size: 0.75rem;
   }
 
@@ -881,11 +928,12 @@
     gap: 0.5rem;
   }
 
-  .student-status-text h1 {
+  .student-status-text .feather-branding {
     font-size: 0.9rem;
   }
 
-  .student-status-text p {
+  .student-status-text .session-info,
+  .student-status-text .student-info {
     font-size: 0.7rem;
   }
 
@@ -1166,14 +1214,13 @@
     flex-shrink: 0;
   }
 
-  .student-status-text h1 {
-    font-size: 1.1rem;
-    line-height: 1.2;
+  .student-status-text .feather-branding {
+    font-size: 1.15rem;
   }
 
-  .student-status-text p {
+  .student-status-text .session-info,
+  .student-status-text .student-info {
     font-size: 0.85rem;
-    line-height: 1.2;
   }
 
   .connection-pill {

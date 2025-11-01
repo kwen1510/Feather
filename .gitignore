@@ -19,3 +19,31 @@ node_modules/.vite/
 # Test results
 playwright-report/
 test-results/
+
+# Test directories and files
+tests/
+PLAYWRIGHT/
+playwright.config.ts
+*.spec.ts
+*.spec.js
+*.test.ts
+*.test.js
+
+# Documentation (keep main README)
+*.md
+!README.md
+
+# Load testing
+load-testing/
+
+# Local database files
+database/
+
+# Deployment scripts (optional - uncomment if you don't want these in git)
+# deploy.sh
+# quick-deploy.sh
+# setup.sh
+# setup-ssl.sh
+
+# SQL migration files (handled separately)
+*.sql

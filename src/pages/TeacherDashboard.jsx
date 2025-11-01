@@ -186,6 +186,7 @@ const TeacherDashboard = () => {
               studentLines: student.lines || [],
               teacherAnnotations: teacherAnnotations[studentId] || [],
               studentName: student.name || 'Unknown Student',
+              clientId: student.clientId || null,
             };
           }
 
@@ -1403,6 +1404,7 @@ const TeacherDashboard = () => {
               studentLines: student.lines || [],
               teacherAnnotations: teacherAnnotations[studentId] || [],
               studentName: student.name || 'Unknown Student',
+              clientId: student.clientId || null,
             };
           }
 

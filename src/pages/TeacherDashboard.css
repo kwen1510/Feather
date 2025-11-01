@@ -29,12 +29,21 @@
   gap: 12px;
   align-self: flex-start;
   padding: 8px 0;
-  color: #0f172a;
+  font-weight: 700;
+  font-size: 1.1rem;
 }
 
 .feather-branding svg {
-  color: #6366f1;
+  color: #059669;
   stroke-width: 2;
+  filter: drop-shadow(0 1px 2px rgba(5, 150, 105, 0.3));
+}
+
+.feather-branding span {
+  background: linear-gradient(135deg, #059669 0%, #065f46 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
 }
 
 .feather-text {
@@ -42,7 +51,7 @@
   font-weight: 700;
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   letter-spacing: -0.02em;
-  background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+  background: linear-gradient(135deg, #059669 0%, #065f46 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
