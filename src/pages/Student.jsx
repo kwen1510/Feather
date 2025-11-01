@@ -112,6 +112,7 @@ function Student() {
   // Teacher lines (read-only overlay, assumed base coordinates)
   const [teacherLines, setTeacherLines] = useState([]);
   const [sharedImage, setSharedImage] = useState(null);
+  const sharedImageRef = useRef(null); // Ref to access latest sharedImage in callbacks
 
   // Drawing state
   const [tool, setTool] = useState('pen');
@@ -178,6 +179,40 @@ function Student() {
       localStorage.removeItem(STUDENT_PREFS_KEY);
     }
   }, [roomId, studentName]);
+
+  // Load shared image from localStorage after roomId is initialized
+  useEffect(() => {
+    if (roomId) {
+      try {
+        const saved = localStorage.getItem(`sharedImage_${roomId}`);
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          setSharedImage(parsed);
+          console.log('✅ Restored shared image from localStorage for room:', roomId);
+        }
+      } catch (error) {
+        console.error('Error loading shared image from localStorage:', error);
+      }
+    }
+  }, [roomId]);
+
+  // Keep ref updated with latest sharedImage and save to localStorage
+  useEffect(() => {
+    sharedImageRef.current = sharedImage;
+    
+    // Save shared image to localStorage for persistence across page refreshes
+    if (roomId) {
+      try {
+        if (sharedImage) {
+          localStorage.setItem(`sharedImage_${roomId}`, JSON.stringify(sharedImage));
+        } else {
+          localStorage.removeItem(`sharedImage_${roomId}`);
+        }
+      } catch (error) {
+        console.error('Error saving shared image to localStorage:', error);
+      }
+    }
+  }, [sharedImage, roomId]);
 
   // Detect mobile device on mount and resize
   useEffect(() => {
