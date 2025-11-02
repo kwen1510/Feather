@@ -143,6 +143,29 @@ Required environment variables:
 
 See **[VERCEL_ENV.md](VERCEL_ENV.md)** for details.
 
+### Database Setup
+
+After deploying to Vercel and setting up your Neon Postgres database, you need to initialize the database schema:
+
+**Option 1: Use the API endpoint (Recommended)**
+```bash
+curl -X POST https://your-app.vercel.app/api/db/init
+```
+
+**Option 2: Run SQL manually**
+1. Open your Neon dashboard
+2. Go to the SQL Editor
+3. Copy and paste the contents of `neon-schema.sql` from the project root
+4. Execute the SQL
+
+The schema creates the following tables:
+- `sessions` - Tracks classroom sessions
+- `participants` - Tracks teachers and students in sessions
+- `questions` - Tracks content sent by teachers
+- `annotations` - Stores student drawings and teacher feedback
+
+**Note**: If you see errors like "relation 'sessions' does not exist", the database schema hasn't been initialized yet.
+
 ## Documentation
 
 - **[VERCEL_DEPLOY.md](VERCEL_DEPLOY.md)** - Complete Vercel deployment guide

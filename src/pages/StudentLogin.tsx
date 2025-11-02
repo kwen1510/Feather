@@ -47,6 +47,28 @@ const StudentLogin: React.FC = () => {
     // Save username immediately when login is clicked
     localStorage.setItem(FEATHER_USERNAME_KEY, name.trim());
 
+    // First, verify session exists in database (if available)
+    // This helps catch database schema issues early
+    let sessionExists = false;
+    try {
+      const sessionResponse = await fetch(`/api/sessions/${sessionCode.trim().toUpperCase()}`);
+      if (sessionResponse.ok) {
+        sessionExists = true;
+      } else if (sessionResponse.status === 500) {
+        // Check if it's a schema error
+        const errorData = await sessionResponse.json().catch(() => ({}));
+        if (errorData.error === 'Database schema not initialized') {
+          setError('Database not set up. Please contact your teacher or administrator.');
+          setIsChecking(false);
+          return;
+        }
+      }
+      // 404 is okay - session might not exist yet, but teacher might be present
+    } catch (dbError) {
+      console.warn('Session database check failed, continuing with presence check:', dbError);
+      // Continue with presence check as fallback
+    }
+
     // Try to connect to teacher - if it pings back, log in
     try {
       const Ably = (await import('ably/promises')).default;

@@ -195,9 +195,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     } else {
       res.status(405).json({ error: 'Method not allowed' });
     }
-  } catch (err) {
+  } catch (err: any) {
     const errorMessage = err instanceof Error ? err.message : 'Unknown error';
     console.error('Session operation error:', err);
+    
+    // Check if error is due to missing table
+    if (err?.code === '42P01' || errorMessage.includes('does not exist')) {
+      res.status(500).json({ 
+        error: 'Database schema not initialized', 
+        details: 'The sessions table does not exist. Please run the database schema migration.',
+        hint: 'See neon-schema.sql in the project root or call /api/db/init to initialize the database.'
+      });
+      return;
+    }
+    
     res.status(500).json({ error: 'Failed to process session operation', details: errorMessage });
   } finally {
     await pool.end();
