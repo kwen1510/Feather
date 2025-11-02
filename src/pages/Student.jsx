@@ -1035,7 +1035,7 @@ function Student() {
           await saveStrokeToIndexedDB(strokeToSave, roomId, studentId, 'student', sessionId);
           console.log('✅ Stroke saved to IndexedDB:', strokeToSave.strokeId);
 
-          // 2) Publish completed stroke to Ably on individual channel (single message per stroke)
+          // 2) Publish completed stroke to Ably on individual channel (so teacher can see)
           if (individualChannel) {
             individualChannel.publish('student-layer', {
               lines: studentLinesRef.current,

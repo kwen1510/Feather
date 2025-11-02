@@ -57,6 +57,8 @@ const TestTeacher = () => {
   const [broadcastChannel, setBroadcastChannel] = useState(null); // Broadcast channel: {roomId}-broadcast (teacher publishes, all subscribe)
   const [studentChannels, setStudentChannels] = useState({}); // Individual channels: {roomId}-{studentId} (one per student, bidirectional)
   const studentChannelsRef = useRef({}); // Ref to access latest student channels in callbacks
+  const [studentChannel, setStudentChannel] = useState(null); // Student channel for presence
+  const [teacherChannel, setTeacherChannel] = useState(null); // Teacher channel for annotations
   const [isConnected, setIsConnected] = useState(false);
   const [clientId] = useState(`teacher-${Math.random().toString(36).substring(7)}`);
 
@@ -580,13 +582,88 @@ const TestTeacher = () => {
 
         setAbly(ablyClient);
 
-        // Get channel
-        const studentCh = ablyClient.channels.get(`${roomId}-student`);
+        // Get channels - use broadcast channel for presence monitoring
+        const broadcastCh = ablyClient.channels.get(`${roomId}-broadcast`);
+        const studentCh = broadcastCh; // Alias for backwards compatibility
         const teacherCh = ablyClient.channels.get(`${roomId}-teacher`);
 
-        whiteboardChannel = studentCh; // Keep reference for cleanup (presence monitoring on student channel)
+        whiteboardChannel = broadcastCh; // Keep reference for cleanup (presence monitoring on broadcast channel)
 
-        // Removed: Subscribe to stroke count updates (will be replaced with real-time stroke subscription)
+        // Helper function to subscribe to individual student channel
+        const subscribeToStudentChannel = (studentId) => {
+          // Check if already subscribed
+          if (studentChannelsRef.current[studentId]) {
+            console.log(`✅ Already subscribed to channel for ${studentId}`);
+            return studentChannelsRef.current[studentId];
+          }
+
+          // Create individual channel for this student
+          const individualCh = ablyClient.channels.get(`${roomId}-${studentId}`);
+
+          console.log(`📡 Subscribing to individual channel: ${roomId}-${studentId}`);
+
+          // Listen for student drawing updates on individual channel
+          individualCh.subscribe('student-layer', (message) => {
+            const { lines, studentId: msgStudentId, clientId: studentClientId } = message.data;
+
+            // Use persistent studentId (direct O(1) lookup) or fallback to clientId search
+            setStudents(prev => {
+              const lookupId = msgStudentId || Object.keys(prev).find(id => prev[id].clientId === studentClientId);
+
+              if (!lookupId) {
+                console.warn('⚠️ Student not found for stroke update. studentId:', msgStudentId, 'clientId:', studentClientId);
+                console.warn('Available students:', Object.keys(prev));
+                return prev;
+              }
+
+              console.log('✅ Updating student', lookupId, 'with', (lines || []).length, 'lines');
+
+              return {
+                ...prev,
+                [lookupId]: {
+                  ...prev[lookupId],
+                  lines: lines || [],
+                }
+              };
+            });
+          });
+
+          // Listen for annotation requests from this student
+          individualCh.subscribe('request-teacher-annotations', async (message) => {
+            const requestingStudentId = message.data?.studentId;
+            const requestingClientId = message.data?.clientId;
+
+            console.log(`📨 Received annotation request from student ${requestingStudentId} on individual channel`);
+
+            // Load annotations from IndexedDB for this student
+            try {
+              const { loadAllTeacherAnnotations } = await import('../utils/indexedDB');
+              const allAnnotations = await loadAllTeacherAnnotations(roomId, 'teacher');
+              const annotations = allAnnotations[requestingStudentId] || [];
+
+              console.log(`📤 Sending ${annotations.length} teacher annotations to student ${requestingStudentId} on individual channel`);
+
+              // Send annotations back to requesting student on their individual channel
+              individualCh.publish('response-teacher-annotations', {
+                targetStudentId: requestingStudentId,
+                targetClientId: requestingClientId,
+                annotations: annotations,
+                timestamp: Date.now(),
+              });
+            } catch (error) {
+              console.error('❌ Error loading annotations from IndexedDB:', error);
+            }
+          });
+
+          // Store channel reference
+          studentChannelsRef.current[studentId] = individualCh;
+          setStudentChannels(prev => ({
+            ...prev,
+            [studentId]: individualCh
+          }));
+
+          return individualCh;
+        };
 
         // Listen for presence events (student connect/disconnect)
         studentCh.presence.subscribe('enter', (member) => {
@@ -693,6 +770,9 @@ const TestTeacher = () => {
             };
           });
 
+          // Subscribe to individual student channel
+          subscribeToStudentChannel(incomingStudentId);
+
           // Send current shared image if exists
           setTimeout(() => {
             try {
@@ -778,32 +858,6 @@ const TestTeacher = () => {
           });
         });
 
-        // Listen for student drawing updates
-        whiteboardChannel.subscribe('student-layer', (message) => {
-          const { lines, studentId, clientId: studentClientId } = message.data;
-
-          // Use persistent studentId (direct O(1) lookup) or fallback to clientId search
-          setStudents(prev => {
-            const lookupId = studentId || Object.keys(prev).find(id => prev[id].clientId === studentClientId);
-
-            if (!lookupId) {
-              console.warn('⚠️ Student not found for stroke update. studentId:', studentId, 'clientId:', studentClientId);
-              console.warn('Available students:', Object.keys(prev));
-              return prev;
-            }
-
-            console.log('✅ Updating student', lookupId, 'with', (lines || []).length, 'lines');
-
-            return {
-              ...prev,
-              [lookupId]: {
-                ...prev[lookupId],
-                lines: lines || [],
-              }
-            };
-          });
-        });
-
         // Listen for teacher shared images
         whiteboardChannel.subscribe('teacher-image', (message) => {
           setSharedImage(message.data);
@@ -835,36 +889,8 @@ const TestTeacher = () => {
           }, 100);
         });
 
-        // Handle student request for teacher annotations (after student refresh)
-        whiteboardChannel.subscribe('request-teacher-annotations', async (message) => {
-          const requestingStudentId = message.data?.studentId;
-          const requestingClientId = message.data?.clientId;
-
-          console.log(`📨 Received annotation request from student ${requestingStudentId}`);
-
-          // Load annotations from IndexedDB for this student
-          try {
-            const { loadAllTeacherAnnotations } = await import('../utils/indexedDB');
-            const allAnnotations = await loadAllTeacherAnnotations(roomId, 'teacher');
-            const annotations = allAnnotations[requestingStudentId] || [];
-
-            console.log(`📤 Sending ${annotations.length} teacher annotations to student ${requestingStudentId}`);
-
-            // Send annotations back to requesting student
-            setTimeout(() => {
-              if (whiteboardChannel && whiteboardChannel.state === 'attached') {
-                whiteboardChannel.publish('response-teacher-annotations', {
-                  targetStudentId: requestingStudentId,
-                  targetClientId: requestingClientId,
-                  annotations: annotations,
-                  timestamp: Date.now(),
-                });
-              }
-            }, 100);
-          } catch (error) {
-            console.error('❌ Error loading annotations from IndexedDB:', error);
-          }
-        });
+        // Removed: Old broadcast-based annotation request listener
+        // Now using individual student channels (see subscribeToStudentChannel helper above)
 
         // Handle student response with their strokes (after teacher reconnect)
         whiteboardChannel.subscribe('response-student-strokes', (message) => {
@@ -950,9 +976,16 @@ const TestTeacher = () => {
           });
 
           console.log(`📊 Total students in state after presence load: ${Object.keys(currentStudents).length}`);
+
+          // Subscribe to individual channels for all existing students
+          Object.keys(currentStudents).forEach(studentId => {
+            subscribeToStudentChannel(studentId);
+          });
+
           return currentStudents;
         });
 
+        setBroadcastChannel(broadcastCh);
         setStudentChannel(studentCh);
         setTeacherChannel(teacherCh);
 
@@ -1079,7 +1112,7 @@ const TestTeacher = () => {
 
   // Handle teacher annotations
   const handleAnnotate = async (annotations) => {
-    if (!selectedStudent || !channel) return;
+    if (!selectedStudent) return;
 
     // Use persistent studentId for storage, clientId for Ably delivery
     const persistentStudentId = selectedStudent.studentId;
@@ -1096,13 +1129,19 @@ const TestTeacher = () => {
       [persistentStudentId]: annotations,
     }));
 
-    // Publish annotations to Ably using current clientId for delivery (for real-time updates)
-    teacherChannel.publish('teacher-annotation', {
-      targetStudentId: currentClientId, // Use clientId for Ably delivery
-      annotations: annotations,
-      teacherId: clientId,
-      timestamp: Date.now(),
-    });
+    // Publish annotations to individual student channel (for real-time updates)
+    const studentChannel = studentChannelsRef.current[persistentStudentId];
+    if (studentChannel) {
+      studentChannel.publish('teacher-annotation', {
+        targetStudentId: currentClientId, // Use clientId for Ably delivery
+        annotations: annotations,
+        teacherId: clientId,
+        timestamp: Date.now(),
+      });
+      console.log(`📤 Published ${annotations.length} annotations to individual channel for ${persistentStudentId}`);
+    } else {
+      console.warn(`⚠️ No individual channel found for student ${persistentStudentId}`);
+    }
 
     // Save all annotations to IndexedDB for this specific student
     setTimeout(async () => {
@@ -1239,10 +1278,10 @@ const TestTeacher = () => {
   };
 
   const handleSendImage = async () => {
-    if (!stagedImage || !channel) return;
+    if (!stagedImage || !broadcastChannel) return;
 
     try {
-      await teacherChannel.publish('teacher-image', stagedImage);
+      await broadcastChannel.publish('teacher-image', stagedImage);
       setSharedImage(stagedImage);
       setImageMessage('Image sent to all students.');
     } catch (error) {
@@ -1398,8 +1437,8 @@ const TestTeacher = () => {
   };
 
   const handleSendToClass = async () => {
-    if (!channel || !sessionId || !isConnected) {
-      console.error('Cannot send: channel or sessionId missing', { channel: !!channel, sessionId, isConnected });
+    if (!broadcastChannel || !sessionId || !isConnected) {
+      console.error('Cannot send: broadcastChannel or sessionId missing', { broadcastChannel: !!broadcastChannel, sessionId, isConnected });
       setImageMessage('Error: Not connected properly. Please refresh the page.');
       showToast('Failed to send: Connection issue', 'error');
       return;

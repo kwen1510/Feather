@@ -13,7 +13,30 @@ This tool simulates **real students** connecting to your whiteboard application 
 - ✅ Reports performance statistics
 - ✅ Tests Ably real-time sync under load
 
-## Quick Start
+## Web Console Quick Start (Recommended)
+
+1. Start the load-testing server:
+   ```bash
+   cd /Users/etdadmin/Desktop/Ably/load-testing
+   npm run server
+   ```
+2. Open `http://localhost:8080/` to access the dashboard (it hits the same `/api/*` endpoints the React app uses).
+3. Prefer the React UI instead? Keep the server running, then from the project root start Vite (`npm run dev`) and visit `http://localhost:5173/load-testing`.
+
+The web console lets you:
+
+- Pick curated load presets (light, moderate, spike, soak)
+- Tune concurrency, draw cadence, ramp-up and test duration
+- Launch/stop tests with one click
+- Watch live metrics in real time (connections, throughput, errors)
+- Stream structured event logs for investigation
+- Point at a remote API (for example `http://146.190.100.142`) or switch back to localhost at any time through the UI field
+
+### Zero-install Remote Dashboard
+
+If you deploy or run this load-testing server alone (for example at `http://146.190.100.142`), simply open that URL in a browser. The root path serves the same dashboard, pre-configured to target whichever host you visited. This lets you operate the load test runner directly from the remote machine without cloning the repository or running Vite locally.
+
+## CLI Quick Start
 
 ### 1. Install Dependencies
 
@@ -22,29 +45,164 @@ cd /Users/etdadmin/Desktop/Ably/load-testing
 npm install
 ```
 
-### 2. Configure Test Parameters
-
-```bash
-cp .env.example .env
-nano .env
-```
-
-Edit the configuration:
-
-```env
-NUM_STUDENTS=10              # Number of simulated students
-ROOM_CODE=load-test-room     # Room to join
-DRAW_INTERVAL_MS=2000        # How often to draw (ms)
-STROKES_PER_DRAW=3           # Strokes per draw action
-TEST_DURATION_SECONDS=60     # Test duration
-TOKEN_SERVER_URL=http://localhost:8080/api/token
-```
-
-### 3. Run the Load Test
+### 2. Run the Load Test
 
 ```bash
 npm start
 ```
+
+> Need custom settings? Either prefix the command with env vars (`NUM_STUDENTS=50 npm start`) or create a `.env` file using `.env.example` as a reference—totally optional if you are happy with the defaults.
+
+## 🎯 Testing with Feather Application (Recommended)
+
+The load test is **fully compatible** with the Feather application's test mode, allowing you to visually verify student connections and real-time drawing on the teacher dashboard!
+
+### Quick Start: Visual Load Testing
+
+**Step 1: Start the Feather server**
+```bash
+cd /Users/etdadmin/Desktop/Ably/Feather
+npm run dev
+```
+
+**Step 2: Open the simplified load test dashboard**
+
+Open in your browser:
+```
+http://localhost:5173/test/load?room=LOADTEST
+```
+
+**Why `/test/load`?** It's optimized for load testing:
+- ✅ **Dark theme** - Better for extended testing sessions
+- ✅ **Minimal UI** - Focus only on student cards
+- ✅ **Live stats overlay** - See test metrics in real-time
+- ✅ **Load test badges** - Easily identify load test students
+- ✅ **No session validation** - Perfect for testing
+
+*Alternative:* Use `/test/teacher?room=LOADTEST` for the full dashboard with all features.
+
+**Step 3: Run the load test**
+
+In a new terminal:
+```bash
+cd /Users/etdadmin/Desktop/Ably/load-testing
+ROOM_CODE=LOADTEST NUM_STUDENTS=10 npm start
+```
+
+**Step 4: Watch it work! 🎉**
+
+In the Feather teacher dashboard, you should see:
+- ✅ **10 student cards appear** with names like "Load Test 1", "Load Test 2", etc.
+- ✅ **Real-time strokes** appearing on each student's canvas every 2 seconds
+- ✅ **Click any card** to open the full canvas and see detailed drawing
+- ✅ **Console logs** showing student connections and drawing events
+
+### What Makes This Work?
+
+The load test now sends Feather-compatible data:
+- **Persistent studentId**: Each student has a unique ID like `load-test-student-1`
+- **Presence data**: Includes student name, ID, and visibility status
+- **Proper stroke format**: Includes metadata (canvas dimensions, scale) that Feather expects
+- **Event handling**: Responds to session lifecycle events (start, end, clear)
+
+### Advanced Testing Options
+
+#### Test with Bot Students (UI Comparison)
+
+Add pre-populated bot students to the dashboard for comparison:
+```
+http://localhost:5173/test/teacher?room=LOADTEST&bot=5
+```
+
+This creates 5 static bot students in the UI. Load test students will appear alongside them, making it easy to distinguish real Ably connections from UI-only bots.
+
+#### Scale Testing
+
+Test with more students to see performance:
+```bash
+# Light load (10 students)
+ROOM_CODE=LOADTEST NUM_STUDENTS=10 npm start
+
+# Moderate load (30 students)
+ROOM_CODE=LOADTEST NUM_STUDENTS=30 npm start
+
+# Heavy load (50 students)
+ROOM_CODE=LOADTEST NUM_STUDENTS=50 npm start
+```
+
+#### Adjust Drawing Frequency
+
+Make students draw faster or slower:
+```bash
+# Draw every second (high traffic)
+ROOM_CODE=LOADTEST NUM_STUDENTS=10 DRAW_INTERVAL_MS=1000 npm start
+
+# Draw every 5 seconds (low traffic)
+ROOM_CODE=LOADTEST NUM_STUDENTS=10 DRAW_INTERVAL_MS=5000 npm start
+```
+
+### Testing on iPad
+
+1. **Find your computer's local IP address:**
+   ```bash
+   ipconfig getifaddr en0  # macOS/Linux
+   ```
+
+2. **Start Feather with host binding:**
+   ```bash
+   cd /Users/etdadmin/Desktop/Ably/Feather
+   npm run dev -- --host
+   ```
+
+3. **Open simplified dashboard on iPad:**
+   ```
+   http://YOUR_IP:5173/test/load?room=LOADTEST
+   ```
+   
+   **iPad-optimized features:**
+   - Dark theme reduces eye strain
+   - Large touch targets for grid controls
+   - Stats overlay in top-right corner
+   - Landscape mode recommended for best view
+
+4. **Run load test from computer:**
+   ```bash
+   cd /Users/etdadmin/Desktop/Ably/load-testing
+   ROOM_CODE=LOADTEST NUM_STUDENTS=10 npm start
+   ```
+
+5. **Watch students appear on iPad in real-time!**
+   - Cards appear with green "LOAD TEST" badges
+   - Stats update live in the overlay
+   - Tap any card to see full canvas
+
+### Troubleshooting Feather Integration
+
+**Students don't appear on dashboard:**
+- ✅ Check that room codes match (URL parameter and `ROOM_CODE` env var)
+- ✅ Ensure Feather server is running on port 5173
+- ✅ Check browser console for connection errors
+- ✅ Verify token server is accessible at `http://localhost:8080/api/token`
+
+**Strokes don't appear:**
+- ✅ Check browser console for "student-layer" events
+- ✅ Verify students entered presence (should see join toasts)
+- ✅ Try clicking a student card to see the full canvas
+
+**Token server errors:**
+- ✅ Make sure Feather's `server.js` is running (it provides `/api/token`)
+- ✅ Default port is 8080, check if it's in use
+- ✅ Restart the Feather server if needed
+
+### Session Lifecycle Events
+
+Load test students now respond to Feather session events:
+
+- **Session Started**: Logged when teacher starts the session
+- **Session Ended**: Students gracefully stop drawing and disconnect
+- **Clear All Drawings**: Logged when teacher sends new content
+
+Check the load test console output to see these events in action!
 
 ## Configuration Options
 
@@ -92,7 +250,7 @@ TEST_DURATION_SECONDS=300   # Run for 5 minutes
 
 ### TOKEN_SERVER_URL
 **Default:** `http://localhost:8080/api/token`
-**Description:** Your Ably token server endpoint
+**Description:** Your Ably token server endpoint (switch to a remote runner—e.g. `http://146.190.100.142/api/token`—when needed)
 
 ```env
 # Test locally
@@ -105,9 +263,41 @@ TOKEN_SERVER_URL=http://146.190.100.142/api/token
 TOKEN_SERVER_URL=https://yourapp.com/api/token
 ```
 
+### RAMP_UP_BATCH_SIZE
+**Default:** `10`
+**Description:** Number of students to connect in parallel per batch.
+
+```env
+RAMP_UP_BATCH_SIZE=25  # Useful for spike tests
+```
+
+### RAMP_UP_DELAY_MS
+**Default:** `300`
+**Description:** Delay between connection batches (milliseconds).
+
+```env
+RAMP_UP_DELAY_MS=0  # Connect batches back-to-back
+```
+
+### STATS_INTERVAL_MS
+**Default:** `5000`
+**Description:** How often CLI stats are printed (milliseconds).
+
+```env
+STATS_INTERVAL_MS=2000
+```
+
+### TEST_PRESET
+**Default:** _(none)_
+**Description:** Apply one of the curated presets (`light`, `medium`, `spike`, `soak`).
+
+```env
+TEST_PRESET=spike
+```
+
 ## Example Test Scenarios
 
-### Light Load Test (10 students)
+### Light Shakedown (Preset: `light`)
 
 ```bash
 NUM_STUDENTS=10
@@ -121,47 +311,48 @@ TEST_DURATION_SECONDS=60
 - 10 messages/second
 - Good for initial testing
 
-### Medium Load Test (50 students)
+### Moderate Class (Preset: `medium`)
 
 ```bash
-NUM_STUDENTS=50
+NUM_STUDENTS=30
 DRAW_INTERVAL_MS=2000
 STROKES_PER_DRAW=3
 TEST_DURATION_SECONDS=120
 ```
 
 **Expected:**
-- ~4,500 messages in 120 seconds
-- 37.5 messages/second
-- Tests moderate classroom size
+- ~5,400 messages in 120 seconds
+- 45 messages/second
+- Represents a typical busy classroom
 
-### Heavy Load Test (100 students)
+### Spike Storm (Preset: `spike`)
 
 ```bash
-NUM_STUDENTS=100
-DRAW_INTERVAL_MS=1000
-STROKES_PER_DRAW=5
-TEST_DURATION_SECONDS=300
+NUM_STUDENTS=75
+DRAW_INTERVAL_MS=1500
+STROKES_PER_DRAW=4
+TEST_DURATION_SECONDS=90
+RAMP_UP_BATCH_SIZE=25
+RAMP_UP_DELAY_MS=100
 ```
 
 **Expected:**
-- ~30,000 messages in 300 seconds
-- 100 messages/second
-- Stress test for large classrooms
+- Rapid ramp to 75 concurrent students
+- ~18,000 messages in 90 seconds
+- Validates burst handling and connection churn
 
-### Stress Test (200+ students)
+### Soak Session (Preset: `soak`)
 
 ```bash
-NUM_STUDENTS=200
-DRAW_INTERVAL_MS=500
-STROKES_PER_DRAW=3
+NUM_STUDENTS=20
+DRAW_INTERVAL_MS=4000
+STROKES_PER_DRAW=2
 TEST_DURATION_SECONDS=600
 ```
 
 **Expected:**
-- ~120,000 messages in 600 seconds
-- 200 messages/second
-- Maximum stress test
+- ~6,000 messages across 10 minutes
+- Surfaces slow leaks and long-running stability issues
 
 ## Understanding the Output
 
@@ -335,9 +526,10 @@ NUM_STUDENTS=100 TEST_DURATION_SECONDS=30 npm start
 # Test specific room
 ROOM_CODE=classroom-a NUM_STUDENTS=20 npm start
 
-# Test production
+# Test remote server
 TOKEN_SERVER_URL=http://146.190.100.142/api/token NUM_STUDENTS=50 npm start
 ```
+
 
 ## Sample Output
 
@@ -350,7 +542,7 @@ Configuration:
   - Draw Interval: 2000ms
   - Strokes per Draw: 3
   - Test Duration: 60s
-  - Token Server: http://146.190.100.142/api/token
+  - Token Server: http://localhost:8080/api/token
 
 
 ✅ Student 1 connected (1/50)

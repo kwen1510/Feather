@@ -6,10 +6,16 @@
   "main": "load-test.js",
   "scripts": {
     "test": "node load-test.js",
-    "start": "node load-test.js"
+    "start": "node load-test.js",
+    "server": "node server.js",
+    "inject": "node inject-student.js",
+    "inject:interactive": "node inject-student-interactive.js",
+    "inject:remote": "node inject-remote.js",
+    "control-panel": "node control-panel-server.js"
   },
   "dependencies": {
     "ably": "^1.2.46",
-    "dotenv": "^17.2.3"
+    "dotenv": "^17.2.3",
+    "express": "^4.18.2"
   }
 }

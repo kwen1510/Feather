@@ -13,6 +13,7 @@ function TestStudent() {
 
   const [channel, setChannel] = useState(null);
   const [clientId] = useState(`test-student-${Math.random().toString(36).substr(2, 9)}`);
+  const [studentId] = useState(`test-student-${Math.random().toString(36).substr(2, 9)}`);
   const [isConnected, setIsConnected] = useState(false);
 
   // Student lines (editable)
@@ -45,7 +46,7 @@ function TestStudent() {
           setIsConnected(false);
         });
 
-        const whiteboardChannel = ably.channels.get(`room-${roomId}`);
+        const whiteboardChannel = ably.channels.get(`${roomId}-broadcast`);
 
         // Wait for channel to attach
         await new Promise((resolve, reject) => {
@@ -59,12 +60,32 @@ function TestStudent() {
         // Enter presence
         const presenceData = {
           name: studentName,
+          studentId: studentId,
           role: 'student',
           testMode: true
         };
         console.log('📍 Entering presence with data:', presenceData);
         await whiteboardChannel.presence.enter(presenceData);
-        console.log('✅ Test Student entered presence as:', studentName);
+        console.log('✅ Test Student entered presence as:', studentName, 'with studentId:', studentId);
+
+        // Subscribe to individual student channel for teacher annotations
+        const individualChannel = ably.channels.get(`${roomId}-${studentId}`);
+        await individualChannel.attach();
+
+        individualChannel.subscribe('teacher-annotation', (message) => {
+          console.log('📨 Received teacher annotations:', message.data);
+          const annotations = message.data?.annotations || [];
+          setTeacherLines(annotations);
+        });
+
+        console.log('✅ Subscribed to individual channel:', `${roomId}-${studentId}`);
+
+        // Listen for clear-all-drawings event from teacher
+        whiteboardChannel.subscribe('clear-all-drawings', (message) => {
+          console.log('🗑️ Received clear-all-drawings event');
+          setStudentLines([]);
+          setTeacherLines([]);
+        });
 
         // Subscribe to student layer
         whiteboardChannel.subscribe('student-layer', (message) => {
@@ -100,7 +121,7 @@ function TestStudent() {
     };
 
     initAbly();
-  }, [clientId, roomId, studentName]);
+  }, [clientId, roomId, studentName, studentId]);
 
   // Drawing handlers
   const handleMouseDown = (e) => {
@@ -141,7 +162,11 @@ function TestStudent() {
 
     const lastLine = studentLines[studentLines.length - 1];
     if (lastLine && lastLine.points.length >= 4) {
-      channel.publish('student-layer', { lines: [lastLine] });
+      channel.publish('student-layer', {
+        lines: studentLines,
+        studentId: studentId,
+        clientId: clientId
+      });
     }
   };
 
