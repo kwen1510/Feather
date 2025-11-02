@@ -1,158 +1,220 @@
-# Quick Reference - Digital Ocean Deployment
+# Quick Reference - Vercel Deployment
 
-## First-Time Setup (Run Once)
+## First-Time Setup
 
+### 1. Install Vercel CLI
 ```bash
-# 1. SSH into your droplet
-ssh root@YOUR_DROPLET_IP
-
-# 2. Clone repository (your DEPLOY folder from GitHub)
-cd /var/www
-git clone https://github.com/YOUR_USERNAME/YOUR_REPO.git whiteboard
-cd whiteboard
-
-# 3. Run initial setup
-chmod +x setup.sh
-./setup.sh
-
-# 4. Configure environment
-cp .env.example .env
-nano .env
-# Add your ABLY_API_KEY
-
-# 5. Update nginx config with your IP
-nano nginx.conf
-# Replace YOUR_DOMAIN_OR_IP with your droplet IP
-
-# 6. Deploy the application
-chmod +x deploy.sh
-./deploy.sh
-
-# 7. Access at http://YOUR_DROPLET_IP
+npm i -g vercel
 ```
 
-## SSL Setup (Optional, After Domain Setup)
-
+### 2. Link Project
 ```bash
-ssh root@YOUR_DROPLET_IP
-cd /var/www/whiteboard
-chmod +x setup-ssl.sh
-./setup-ssl.sh
+vercel link
+```
+
+### 3. Configure Environment Variables
+Add these in Vercel dashboard (Settings → Environment Variables):
+- `ABLY_API_KEY`
+- `VITE_SUPABASE_URL`
+- `VITE_SUPABASE_ANON_KEY`
+- `SUPABASE_URL`
+- `SUPABASE_ANON_KEY`
+
+See [VERCEL_ENV.md](VERCEL_ENV.md) for details.
+
+### 4. Deploy
+```bash
+# Preview deployment
+vercel
+
+# Production deployment
+vercel --prod
 ```
 
 ## Updating Your Application
 
+### Automatic (Recommended)
+Just push to your Git repository - Vercel deploys automatically!
+
 ```bash
-# After pushing changes to GitHub:
-ssh root@YOUR_DROPLET_IP
-cd /var/www/whiteboard
-./deploy.sh
+git add .
+git commit -m "Update app"
+git push
 ```
 
-## Common Commands
-
-### Application Management
+### Manual Deployment
 ```bash
-pm2 status                    # Check status
-pm2 logs whiteboard-api       # View logs
-pm2 restart whiteboard-api    # Restart app
-pm2 stop whiteboard-api       # Stop app
-pm2 monit                     # Monitor resources
+# Preview
+vercel
+
+# Production
+vercel --prod
 ```
 
-### Nginx Management
+## Local Development
+
+### Development Server
 ```bash
-systemctl status nginx        # Check status
-systemctl restart nginx       # Restart
-nginx -t                      # Test config
+npm run dev
+```
+App runs at `http://localhost:5000`
+
+### With Serverless Functions
+```bash
+vercel dev
+```
+Runs full Vercel environment locally including API functions.
+
+### Local API Server (Legacy)
+```bash
+npm run server
+```
+Runs the legacy `server.ts` on port 8080 (for testing only).
+
+## Vercel CLI Commands
+
+```bash
+vercel                    # Deploy preview
+vercel --prod            # Deploy to production
+vercel link               # Link to existing project
+vercel env add            # Add environment variable
+vercel env ls             # List environment variables
+vercel env rm             # Remove environment variable
+vercel logs               # View function logs
+vercel inspect            # Inspect deployment
+vercel pull               # Pull environment variables
 ```
 
-### View Logs
+## Viewing Logs
+
+### Function Logs (CLI)
 ```bash
-pm2 logs whiteboard-api --lines 100
-tail -f /var/log/nginx/whiteboard-error.log
-tail -f /var/log/nginx/whiteboard-access.log
+vercel logs [deployment-url]
 ```
 
-### Firewall
+### Function Logs (Dashboard)
+1. Go to Vercel dashboard
+2. Select your project
+3. Click on a deployment
+4. Click "Functions" tab
+5. View logs for each function
+
+### Real-time Logs
 ```bash
-ufw status                    # Check firewall
-ufw allow 80/tcp              # Allow HTTP
-ufw allow 443/tcp             # Allow HTTPS
+vercel logs --follow
 ```
 
-### SSL Certificate
+## Monitoring
+
+### Deployment Status
 ```bash
-certbot certificates          # Check certificates
-certbot renew                 # Renew manually
-certbot renew --dry-run       # Test renewal
+vercel ls                 # List all deployments
+vercel inspect [url]      # Inspect specific deployment
 ```
+
+### Analytics
+- View in Vercel dashboard: **Analytics** tab
+- Enable in **Settings** → **Analytics**
+
+## Environment Variables
+
+### Add Variable
+```bash
+vercel env add VARIABLE_NAME
+```
+
+### List Variables
+```bash
+vercel env ls
+```
+
+### Remove Variable
+```bash
+vercel env rm VARIABLE_NAME
+```
+
+### Pull to Local
+```bash
+vercel pull
+```
+Creates `.env.local` with variables from Vercel.
 
 ## Troubleshooting
 
-### App won't start
+### Build Fails
 ```bash
-pm2 logs whiteboard-api --err
-cat /var/www/whiteboard/.env
-lsof -i :8080
+# Clear cache and rebuild
+rm -rf node_modules dist .vercel
+npm install
+vercel --prod
 ```
 
-### Can't access website
-```bash
-systemctl status nginx
-nginx -t
-ufw status
-curl http://localhost
-```
+### Functions Not Working
+1. Check function logs in Vercel dashboard
+2. Verify environment variables are set
+3. Check `vercel.json` configuration
+4. Ensure functions are in `api/` directory
 
-### Real-time not working
-```bash
-# Check browser console
-# Verify Ably key in .env
-curl http://localhost:8080/api/token?clientId=test
-```
+### Environment Variables Not Working
+- Ensure variables are set for correct environment (Production/Preview/Development)
+- Redeploy after adding variables: `vercel --prod`
+- Check variable names match exactly (case-sensitive)
+
+### CORS Issues
+- CORS is configured in serverless functions
+- Check browser console for specific errors
+- Verify API routes use relative paths (`/api/token`, not absolute URLs)
+
+## Common Tasks
+
+### Rollback Deployment
+1. Go to Vercel dashboard
+2. Select project → Deployments
+3. Find previous deployment
+4. Click "..." → "Promote to Production"
+
+### Custom Domain
+1. Go to **Settings** → **Domains**
+2. Add your domain
+3. Update DNS records as instructed
+4. Wait for SSL certificate (automatic)
+
+### Team Collaboration
+1. Go to **Settings** → **Team**
+2. Invite team members
+3. Set permissions (Viewer/Developer/Admin)
 
 ## File Locations
 
-- **App**: `/var/www/whiteboard/`
-- **Nginx Config**: `/etc/nginx/sites-available/whiteboard`
-- **Environment**: `/var/www/whiteboard/.env`
-- **Logs**: `/var/log/nginx/` and `/var/log/pm2/`
-- **SSL Certs**: `/etc/letsencrypt/live/YOUR_DOMAIN/`
+- **Serverless Functions**: `api/` directory
+- **Configuration**: `vercel.json`
+- **Environment Variables**: Vercel dashboard or `.env.local` (local)
+- **Build Output**: `dist/` (created during build)
 
 ## Important URLs
 
+- **Vercel Dashboard**: https://vercel.com/dashboard
 - **Ably Dashboard**: https://ably.com/dashboard
-- **Digital Ocean Console**: https://cloud.digitalocean.com/
-- **PM2 Docs**: https://pm2.keymetrics.io/
-- **Let's Encrypt**: https://letsencrypt.org/
+- **Supabase Dashboard**: https://app.supabase.com
+- **Vercel Docs**: https://vercel.com/docs
 
 ## Emergency Recovery
 
-### Complete restart
+### Redeploy Previous Version
 ```bash
-pm2 restart whiteboard-api
-systemctl restart nginx
+# List deployments
+vercel ls
+
+# Promote specific deployment
+# (use dashboard UI - Settings → Deployments → Promote)
 ```
 
-### Full redeployment
-```bash
-cd /var/www/whiteboard
-git pull
-rm -rf node_modules
-npm install
-npm run build
-pm2 restart whiteboard-api
-```
-
-### Check what's running
-```bash
-ps aux | grep node
-ps aux | grep nginx
-netstat -tlnp | grep :8080
-netstat -tlnp | grep :80
-```
+### Reset Environment
+1. Go to Vercel dashboard
+2. Settings → Environment Variables
+3. Verify all required variables are set
+4. Redeploy: `vercel --prod`
 
 ---
 
-For detailed instructions, see **DEPLOY.md** in the root directory.
+For detailed instructions, see **[VERCEL_DEPLOY.md](VERCEL_DEPLOY.md)**

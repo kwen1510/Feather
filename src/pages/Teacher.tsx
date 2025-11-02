@@ -115,7 +115,7 @@ const Teacher: React.FC = () => {
     const initAbly = async () => {
       try {
         const ably = new Ably.Realtime({
-          authUrl: 'http://localhost:8080/api/token',
+          authUrl: '/api/token',
           authParams: { clientId },
         });
 

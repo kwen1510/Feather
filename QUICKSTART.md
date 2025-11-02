@@ -1,192 +1,203 @@
-# 🚀 Minimal Quick Start - 15 Minutes
+# 🚀 Quick Start - Vercel Deployment
 
-Get your whiteboard running on Digital Ocean in 15 minutes.
+Get your collaborative whiteboard running on Vercel in 10 minutes.
 
 ## Before You Start
 
 You need:
-- [ ] GitHub account (upload DEPLOY folder)
-- [ ] Digital Ocean account
-- [ ] Ably API key from [ably.com/dashboard](https://ably.com/dashboard)
+- [ ] A Vercel account ([Sign up free](https://vercel.com/signup))
+- [ ] An Ably API key ([Get from ably.com](https://ably.com/dashboard))
+- [ ] A Supabase project ([Get from supabase.com](https://supabase.com))
+- [ ] Node.js installed locally
 
 ---
 
-## Step 1: Create Droplet (5 min)
-
-1. Go to [cloud.digitalocean.com](https://cloud.digitalocean.com)
-2. Click **Create → Droplets**
-3. Choose:
-   - **Ubuntu 22.04 (LTS) x64**
-   - **$6/month** or **$12/month** plan
-   - Add your **SSH key**
-4. Click **Create Droplet**
-5. **Copy the IP address** (e.g., `164.90.123.45`)
-
----
-
-## Step 2: Upload Code to GitHub (2 min)
+## Step 1: Install Vercel CLI (2 min)
 
 ```bash
-cd /Users/etdadmin/Desktop/Ably/DEPLOY
+npm i -g vercel
+```
 
-git init
-git add .
-git commit -m "Deploy whiteboard"
-
-# Create new repo on GitHub, then:
-git remote add origin https://github.com/YOUR_USERNAME/YOUR_REPO.git
-git push -u origin main
+Verify installation:
+```bash
+vercel --version
 ```
 
 ---
 
-## Step 3: Deploy to Droplet (8 min)
+## Step 2: Link Your Project (1 min)
 
-### SSH into your droplet:
-```bash
-ssh root@YOUR_DROPLET_IP
-```
-
-### Run these commands (copy-paste all at once):
+From the project root directory:
 
 ```bash
-# Update system
-apt-get update && apt-get install -y git curl
-
-# Install Node.js
-curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
-apt-get install -y nodejs
-
-# Install PM2 and Nginx
-npm install -g pm2
-apt-get install -y nginx
-
-# Clone your repo
-cd /var/www
-git clone https://github.com/YOUR_USERNAME/YOUR_REPO.git whiteboard
-cd whiteboard
-
-# Configure environment
-cp .env.example .env
-nano .env
+vercel link
 ```
 
-**In nano editor:**
-- Change `ABLY_API_KEY` to your actual key
-- Press `Ctrl+X`, then `Y`, then `Enter` to save
-
-**Continue:**
-```bash
-# Update nginx config with your IP
-sed -i "s/YOUR_DOMAIN_OR_IP/YOUR_DROPLET_IP/g" nginx.conf
-
-# Install dependencies and build
-npm install --production
-npm run build
-
-# Configure nginx
-cp nginx.conf /etc/nginx/sites-available/whiteboard
-ln -s /etc/nginx/sites-available/whiteboard /etc/nginx/sites-enabled/
-rm -f /etc/nginx/sites-enabled/default
-nginx -t && systemctl restart nginx
-
-# Start the app with PM2
-pm2 start ecosystem.config.js --env production
-pm2 save
-pm2 startup
-
-# Configure firewall
-ufw --force enable
-ufw allow OpenSSH
-ufw allow 'Nginx Full'
-
-# Done!
-echo "✅ Deployment complete! Access at: http://$(curl -s ifconfig.me)"
-```
+You'll be prompted to:
+1. Log in to Vercel (opens browser)
+2. Choose to link to existing project or create new one
+3. Set project name and settings
 
 ---
 
-## Step 4: Test It
+## Step 3: Configure Environment Variables (3 min)
 
-Open browser: `http://YOUR_DROPLET_IP`
+### Option A: Via Vercel Dashboard (Recommended)
 
-You should see the whiteboard landing page!
+1. Go to [vercel.com/dashboard](https://vercel.com/dashboard)
+2. Select your project
+3. Go to **Settings** → **Environment Variables**
+4. Add each variable:
+
+   ```
+   ABLY_API_KEY=your-ably-api-key-here
+   VITE_SUPABASE_URL=https://your-project.supabase.co
+   VITE_SUPABASE_ANON_KEY=your-supabase-anon-key-here
+   SUPABASE_URL=https://your-project.supabase.co
+   SUPABASE_ANON_KEY=your-supabase-anon-key-here
+   ```
+
+5. Select **Production**, **Preview**, and **Development** for each
+6. Click **Save**
+
+### Option B: Via CLI
+
+```bash
+vercel env add ABLY_API_KEY
+vercel env add VITE_SUPABASE_URL
+vercel env add VITE_SUPABASE_ANON_KEY
+vercel env add SUPABASE_URL
+vercel env add SUPABASE_ANON_KEY
+```
+
+For each, enter the value and select environments.
+
+See [VERCEL_ENV.md](VERCEL_ENV.md) for where to get these values.
 
 ---
 
-## Common Issues
+## Step 4: Deploy (2 min)
 
-### Can't connect?
+### Preview Deployment
 ```bash
-# Check app is running
-pm2 status
-
-# Check nginx
-systemctl status nginx
-
-# View logs
-pm2 logs whiteboard-api
+vercel
 ```
 
-### App crashes?
-```bash
-# Check your .env file has correct Ably key
-cat .env
+This creates a preview deployment with a unique URL.
 
-# Restart app
-pm2 restart whiteboard-api
+### Production Deployment
+```bash
+vercel --prod
 ```
 
-### Forgot your IP?
-```bash
-curl ifconfig.me
-```
+This deploys to your production domain.
 
 ---
 
-## What Next?
+## Step 5: Test It (2 min)
 
-### Update Your App
-When you push changes to GitHub:
+1. Open your deployment URL
+2. Create a room
+3. Open as Teacher in one tab
+4. Open as Student in another tab
+5. Draw in both - verify real-time sync works!
+
+---
+
+## What's Next?
+
+### Automatic Deployments
+
+Connect your Git repository for automatic deployments:
+
+1. Go to Vercel dashboard → **Settings** → **Git**
+2. Connect your repository
+3. Every push to `main` → Production deployment
+4. Every push to other branches → Preview deployment
+
+### Local Development
+
 ```bash
-ssh root@YOUR_DROPLET_IP
-cd /var/www/whiteboard
-git pull
-npm install --production
-npm run build
-pm2 restart whiteboard-api
-```
+# Development server
+npm run dev
 
-### Add HTTPS (Optional)
-```bash
-# Install certbot
-apt-get install -y certbot python3-certbot-nginx
-
-# Get SSL certificate (replace YOUR_DOMAIN)
-certbot --nginx -d YOUR_DOMAIN --non-interactive --agree-tos -m YOUR_EMAIL
+# Or with serverless functions
+vercel dev
 ```
 
 ### View Logs
+
 ```bash
-pm2 logs whiteboard-api         # App logs
-pm2 monit                        # Resource monitor
+# Function logs
+vercel logs
+
+# Or view in dashboard
+# Deployments → Select deployment → Functions → Logs
+```
+
+---
+
+## Troubleshooting
+
+### Build Fails
+
+```bash
+# Clear and rebuild
+rm -rf node_modules dist .vercel
+npm install
+vercel --prod
+```
+
+### Functions Not Working
+
+1. Check function logs in Vercel dashboard
+2. Verify environment variables are set correctly
+3. Ensure variables are set for Production environment
+4. Redeploy: `vercel --prod`
+
+### Environment Variables Not Working
+
+- Variables must be set for the environment you're deploying to
+- Redeploy after adding variables
+- Check variable names match exactly (case-sensitive)
+
+---
+
+## Common Commands
+
+```bash
+vercel                    # Deploy preview
+vercel --prod            # Deploy production
+vercel logs               # View logs
+vercel env ls             # List env vars
+vercel link               # Link project
 ```
 
 ---
 
 ## Cost
 
-**$6-12/month** for the droplet
-**Free** Ably tier (3M messages/month)
+**Free tier includes:**
+- Unlimited personal projects
+- 100GB bandwidth/month
+- Automatic SSL certificates
+- Global CDN
+
+**When you need more:**
+- Pro plan: $20/month
+- Team plan: $20/user/month
+
+See [vercel.com/pricing](https://vercel.com/pricing)
 
 ---
 
 ## Need Help?
 
-- **Full guide**: See [DEPLOY.md](DEPLOY.md)
-- **Commands**: See [QUICK_REFERENCE.md](QUICK_REFERENCE.md)
-- **App info**: See [APP_README.md](APP_README.md)
+- **Full guide**: See [VERCEL_DEPLOY.md](VERCEL_DEPLOY.md)
+- **Environment variables**: See [VERCEL_ENV.md](VERCEL_ENV.md)
+- **App features**: See [APP_README.md](APP_README.md)
+- **Troubleshooting**: See [VERCEL_DEPLOY.md](VERCEL_DEPLOY.md#troubleshooting)
 
 ---
 
-**That's it!** Your collaborative whiteboard is now live on the internet.
+**That's it!** Your collaborative whiteboard is now live on Vercel with automatic deployments! 🎉

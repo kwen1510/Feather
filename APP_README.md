@@ -25,13 +25,17 @@ A two-layer collaborative whiteboard application designed for classroom use, ena
 - **Canvas**: Konva.js + react-konva
 - **Real-time**: Ably Realtime SDK
 - **Routing**: React Router v6
-- **Backend**: Node.js HTTP server for Ably token authentication
+- **Backend**: Vercel Serverless Functions
+- **Database**: Supabase (PostgreSQL)
+- **Deployment**: Vercel
 
 ## Prerequisites
 
 - Node.js (v18 or higher recommended)
 - npm or yarn
 - An Ably account and API key ([Get one free at ably.com](https://ably.com))
+- A Supabase project ([Get free tier](https://supabase.com))
+- A Vercel account ([Sign up free](https://vercel.com))
 
 ## Setup and Installation
 
@@ -43,25 +47,39 @@ npm install
 
 ### 2. Configure Environment Variables
 
-Create a `.env` file in the project root:
+Create a `.env.local` file in the project root:
 
 ```bash
 ABLY_API_KEY=your-app-key:your-secret-key
+VITE_SUPABASE_URL=https://your-project.supabase.co
+VITE_SUPABASE_ANON_KEY=your-supabase-anon-key
 ```
 
-You can get your Ably API key from the [Ably dashboard](https://ably.com/dashboard).
+Or use Vercel CLI to pull environment variables:
+```bash
+vercel pull
+```
 
 ### 3. Run the Application Locally
 
-You need to run two servers:
-
-**Terminal 1 - Ably Token Server (Port 8080):**
+**Option A: Development Server Only**
 ```bash
-npm run server
+npm run dev
 ```
+App runs at `http://localhost:5000`
 
-**Terminal 2 - Vite Dev Server (Port 5173):**
+**Option B: With Serverless Functions (Recommended)**
 ```bash
+vercel dev
+```
+Runs full Vercel environment locally including API functions.
+
+**Option C: Legacy Local Server (for testing)**
+```bash
+# Terminal 1 - Ably Token Server (Port 8080)
+npm run server
+
+# Terminal 2 - Vite Dev Server (Port 5000)
 npm run dev
 ```
 
@@ -69,7 +87,7 @@ npm run dev
 
 Open your browser and navigate to:
 ```
-http://localhost:5173
+http://localhost:5000
 ```
 
 You'll see a landing page where you can:
@@ -80,22 +98,24 @@ You'll see a landing page where you can:
 ## Project Structure
 
 ```
-Ably/
+Feather/
 ├── src/
-│   ├── App.jsx              # Main app with routing
-│   ├── main.jsx             # React entry point
+│   ├── App.tsx              # Main app with routing
+│   ├── main.tsx             # React entry point
 │   ├── index.css            # Global styles
-│   └── pages/
-│       ├── Landing.jsx      # Room selection page
-│       ├── Student.jsx      # Student whiteboard view
-│       ├── Teacher.jsx      # Teacher whiteboard view
-│       ├── Landing.css      # Landing page styles
-│       └── Whiteboard.css   # Whiteboard styles
-├── server.js                # Ably token authentication server
+│   ├── components/          # React components
+│   ├── pages/               # Page components
+│   └── ...
+├── api/                     # Vercel Serverless Functions
+│   ├── token.ts             # Ably token authentication
+│   └── strokes/
+│       └── persist.ts       # Supabase persistence
+├── server.ts                # Legacy server (for local testing)
 ├── index.html               # HTML entry point
-├── vite.config.js           # Vite configuration
+├── vite.config.ts           # Vite configuration
+├── vercel.json              # Vercel configuration
 ├── package.json             # Dependencies and scripts
-└── .env                     # Environment variables (create this)
+└── .env.local               # Environment variables (create this)
 ```
 
 ## How It Works
@@ -197,41 +217,30 @@ npm run build
 
 This creates an optimized build in the `dist/` directory.
 
-### Deployment Options
+### Deployment
 
-#### Option 1: Vercel (Recommended)
+The application is configured for deployment on Vercel. See **[VERCEL_DEPLOY.md](VERCEL_DEPLOY.md)** for complete instructions.
+
+**Quick deployment:**
 
 1. Install Vercel CLI:
 ```bash
 npm i -g vercel
 ```
 
-2. Deploy:
+2. Link your project:
 ```bash
-vercel
+vercel link
 ```
 
-3. Set environment variable in Vercel dashboard:
-   - Go to Project Settings → Environment Variables
-   - Add `ABLY_API_KEY` with your key
+3. Configure environment variables in Vercel dashboard (see [VERCEL_ENV.md](VERCEL_ENV.md))
 
-4. For the token server, create `api/token.js` as a serverless function (or deploy server.js separately)
-
-#### Option 2: Traditional Hosting
-
-1. Build the frontend:
+4. Deploy:
 ```bash
-npm run build
+vercel --prod
 ```
 
-2. Deploy `dist/` folder to any static host (Netlify, GitHub Pages, etc.)
-
-3. Deploy `server.js` to a Node.js hosting service (Heroku, Railway, Render):
-```bash
-node server.js
-```
-
-4. Update the authUrl in both Student.jsx and Teacher.jsx to point to your deployed server
+**Automatic deployments:** Connect your Git repository to Vercel for automatic deployments on every push.
 
 ## Testing Checklist
 
@@ -252,9 +261,10 @@ Before deploying, verify these requirements:
 ### Common Issues
 
 1. **"Connected to Ably" not showing**:
-   - Check that server.js is running on port 8080
-   - Verify `.env` file has correct ABLY_API_KEY
+   - Verify environment variables are set correctly in Vercel dashboard
+   - Check `/api/token` endpoint is accessible
    - Check browser console for error messages
+   - For local dev: ensure `vercel dev` is running or `npm run server` is running
 
 2. **Changes not syncing between clients**:
    - Ensure both clients are in the same room
