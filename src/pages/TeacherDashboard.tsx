@@ -238,7 +238,7 @@ const TeacherDashboard: React.FC = () => {
       }
 
       // Publish session-ended event
-      if (channel) {
+      if (teacherChannel) {
         await teacherChannel.publish('session-ended', {
           timestamp: Date.now(),
           reason,
@@ -257,7 +257,7 @@ const TeacherDashboard: React.FC = () => {
       console.error('Error ending session:', error);
       return false;
     }
-  }, [sessionId, sessionStatus, channel, currentQuestionNumber, roomId, sharedImage]);
+  }, [sessionId, sessionStatus, teacherChannel, currentQuestionNumber, roomId, sharedImage]);
 
   // Redis auto-save removed - now using IndexedDB + Ably recovery only
 
@@ -1015,7 +1015,7 @@ const TeacherDashboard: React.FC = () => {
 
   // Handle teacher annotations
   const handleAnnotate = async (annotations) => {
-    if (!selectedStudent || !channel) return;
+    if (!selectedStudent || !teacherChannel) return;
 
     // Use persistent studentId for storage, clientId for Ably delivery
     const persistentStudentId = selectedStudent.studentId;
@@ -1175,7 +1175,7 @@ const TeacherDashboard: React.FC = () => {
   };
 
   const handleSendImage = async () => {
-    if (!stagedImage || !channel) return;
+    if (!stagedImage || !teacherChannel) return;
 
     try {
       await teacherChannel.publish('teacher-image', stagedImage);
@@ -1334,8 +1334,8 @@ const TeacherDashboard: React.FC = () => {
   };
 
   const handleSendToClass = async () => {
-    if (!channel || !sessionId || !isConnected) {
-      console.error('Cannot send: channel or sessionId missing', { channel: !!channel, sessionId, isConnected });
+    if (!teacherChannel || !sessionId || !isConnected) {
+      console.error('Cannot send: channel or sessionId missing', { channel: !!teacherChannel, sessionId, isConnected });
       setImageMessage('Error: Not connected properly. Please refresh the page.');
       showToast('Failed to send: Connection issue', 'error');
       return;
