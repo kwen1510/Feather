@@ -168,6 +168,9 @@ Vercel Edge Network (CDN)
     ├─→ Static Files (React App)
     └─→ /api/* → Serverless Functions
                       ├─→ /api/token → Ably Authentication
+                      ├─→ /api/sessions → Session Management
+                      ├─→ /api/questions → Question Queries
+                      ├─→ /api/responses → Response Queries
                       └─→ /api/strokes/persist → Neon Postgres
 ```
 

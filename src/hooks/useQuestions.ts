@@ -1,5 +1,4 @@
 import { useQuery } from '@tanstack/react-query';
-import { sql } from '../db/client';
 import type { Question } from '../db/client';
 
 export const useQuestions = (sessionId: string | null) => {
@@ -10,12 +9,11 @@ export const useQuestions = (sessionId: string | null) => {
         return [];
       }
 
-      const results = await sql`
-        SELECT * FROM questions
-        WHERE session_id = ${sessionId}
-        ORDER BY question_number ASC
-      `;
-
+      const response = await fetch(`/api/questions/${sessionId}`);
+      if (!response.ok) {
+        throw new Error('Failed to fetch questions');
+      }
+      const results = await response.json();
       return results as Question[];
     },
     enabled: !!sessionId,

@@ -1,21 +1,9 @@
-import { neon } from '@neondatabase/serverless';
 import { Pool } from '@neondatabase/serverless';
-
-// Get connection string from environment variables
-// Vercel automatically provides POSTGRES_URL when Neon is integrated
-const connectionString = import.meta.env.VITE_POSTGRES_URL || import.meta.env.POSTGRES_URL;
-
-if (!connectionString) {
-  console.error('Missing POSTGRES_URL environment variable. Please check your .env file.');
-}
-
-// For frontend/client-side queries (HTTP-based, low latency)
-// Use this for React Query hooks that run in the browser
-export const sql = neon(connectionString || '');
 
 // For server-side/serverless functions (connection pooling)
 // Use this in API routes and serverless functions
 export function createPool() {
+  const connectionString = process.env.POSTGRES_URL;
   if (!connectionString) {
     throw new Error('POSTGRES_URL environment variable is required');
   }

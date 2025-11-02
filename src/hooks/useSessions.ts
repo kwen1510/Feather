@@ -1,16 +1,15 @@
 import { useQuery } from '@tanstack/react-query';
-import { sql } from '../db/client';
 import type { Session } from '../db/client';
 
 export const useSessions = () => {
   return useQuery({
     queryKey: ['sessions'],
     queryFn: async () => {
-      const results = await sql`
-        SELECT * FROM sessions
-        ORDER BY created_at DESC
-      `;
-
+      const response = await fetch('/api/sessions');
+      if (!response.ok) {
+        throw new Error('Failed to fetch sessions');
+      }
+      const results = await response.json();
       return results as Session[];
     },
   });

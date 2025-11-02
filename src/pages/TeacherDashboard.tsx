@@ -7,7 +7,6 @@ import { Feather } from 'lucide-react';
 import StudentCard from '../components/StudentCard';
 import AnnotationModal from '../components/AnnotationModal';
 import { resizeAndCompressImage } from '../utils/imageUtils';
-import { sql } from '../db/client';
 import { initDB, saveStroke as saveStrokeToIndexedDB, loadStrokes as loadStrokesFromIndexedDB, clearStrokes as clearStrokesFromIndexedDB, validateSession, replaceAllStrokes as replaceAllStrokesInIndexedDB, loadAllTeacherAnnotations } from '../utils/indexedDB';
 import './TeacherDashboard.css';
 
@@ -222,11 +221,21 @@ const TeacherDashboard: React.FC = () => {
         }
       }
 
-      await sql`
-        UPDATE sessions
-        SET status = 'ended', ended_at = ${new Date().toISOString()}
-        WHERE id = ${sessionId}
-      `;
+      // Update session status to ended via API
+      try {
+        const response = await fetch(`/api/sessions/${roomId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: 'ended' }),
+        });
+
+        if (!response.ok) {
+          throw new Error('Failed to end session');
+        }
+      } catch (updateError) {
+        console.error('Failed to update session status:', updateError);
+        throw updateError;
+      }
 
       // Publish session-ended event
       if (channel) {
@@ -289,74 +298,23 @@ const TeacherDashboard: React.FC = () => {
 
     const initializeSession = async () => {
       try {
-        // Query existing sessions (case-insensitive)
-        const existingSessions = await sql`
-          SELECT * FROM sessions
-          WHERE room_code ILIKE ${roomId}
-          ORDER BY created_at DESC
-          LIMIT 1
-        `;
+        // Create or get existing session via API
+        const response = await fetch(`/api/sessions/${roomId}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+        });
 
-        let session = null;
-
-        if (existingSessions && existingSessions.length > 0) {
-          const existingSession = existingSessions[0];
-
-          if (existingSession.status === 'ended') {
-            const updatedSessions = await sql`
-              UPDATE sessions
-              SET status = 'created', started_at = NULL, ended_at = NULL
-              WHERE id = ${existingSession.id}
-              RETURNING *
-            `;
-
-            if (updatedSessions && updatedSessions.length > 0) {
-              session = updatedSessions[0];
-            } else {
-              console.error('Failed to update session');
-              markIdleIfCurrentRoom();
-              return;
-            }
-          } else {
-            session = existingSession;
+        if (!response.ok) {
+          if (response.status === 404) {
+            // Session not found - shouldn't happen with POST, but handle gracefully
+            console.error('Session not found');
+            markIdleIfCurrentRoom();
+            return;
           }
-        } else {
-          try {
-            const newSessions = await sql`
-              INSERT INTO sessions (room_code, status)
-              VALUES (${roomId}, 'created')
-              RETURNING *
-            `;
-
-            if (newSessions && newSessions.length > 0) {
-              session = newSessions[0];
-            } else {
-              throw new Error('No session returned from insert');
-            }
-          } catch (insertError: any) {
-            // Handle duplicate key error (23505)
-            if (insertError.code === '23505' || insertError.message?.includes('duplicate')) {
-              const conflictSessions = await sql`
-                SELECT * FROM sessions
-                WHERE room_code ILIKE ${roomId}
-                ORDER BY created_at DESC
-                LIMIT 1
-              `;
-
-              if (conflictSessions && conflictSessions.length > 0) {
-                session = conflictSessions[0];
-              } else {
-                console.error('Duplicate key reported but no session found when refetching.');
-                markIdleIfCurrentRoom();
-                return;
-              }
-            } else {
-              console.error('Failed to create session:', insertError);
-              markIdleIfCurrentRoom();
-              return;
-            }
-          }
+          throw new Error(`Failed to initialize session: ${response.statusText}`);
         }
+
+        const session = await response.json();
 
         if (cancelled) {
           return;
@@ -1445,14 +1403,18 @@ const TeacherDashboard: React.FC = () => {
       // If this is the first content being sent, start the session
       const isFirstContent = sessionStatus === 'created';
 
-      if (isFirstContent) {
-        // Update session to 'active'
+        if (isFirstContent) {
+        // Update session to 'active' via API
         try {
-          await sql`
-            UPDATE sessions
-            SET status = 'active', started_at = ${new Date().toISOString()}
-            WHERE id = ${sessionId}
-          `;
+          const response = await fetch(`/api/sessions/${roomId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: 'active' }),
+          });
+
+          if (!response.ok) {
+            throw new Error('Failed to start session');
+          }
         } catch (sessionError) {
           console.error('Failed to start session:', sessionError);
           setImageMessage('Failed to start session. Please try again.');

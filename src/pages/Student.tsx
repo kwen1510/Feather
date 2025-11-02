@@ -3,7 +3,6 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { Stage, Layer, Line, Image as KonvaImage } from 'react-konva';
 import * as Ably from 'ably';
-import { sql } from '../db/client';
 import { Pen, Eraser, Undo, Redo, Trash2, Pointer, Feather } from 'lucide-react';
 import { getOrCreateStudentId } from '../utils/identity';
 import { initDB, saveStroke as saveStrokeToIndexedDB, loadStrokes as loadStrokesFromIndexedDB, clearStrokes as clearStrokesFromIndexedDB, validateSession, replaceAllStrokes as replaceAllStrokesInIndexedDB } from '../utils/indexedDB';
@@ -361,21 +360,19 @@ const Student: React.FC = () => {
 
     const validateSession = async () => {
       try {
-        // Check if session exists for this room (case-insensitive)
-        const sessions = await sql`
-          SELECT * FROM sessions
-          WHERE room_code ILIKE ${roomId}
-          ORDER BY created_at DESC
-          LIMIT 1
-        `;
+        // Check if session exists for this room via API
+        const response = await fetch(`/api/sessions/${roomId}`);
 
-        if (!sessions || sessions.length === 0) {
-          console.log('No session found for room code:', roomId);
-          setSessionStatus('no-session');
-          return;
+        if (!response.ok) {
+          if (response.status === 404) {
+            console.log('No session found for room code:', roomId);
+            setSessionStatus('no-session');
+            return;
+          }
+          throw new Error(`Failed to validate session: ${response.statusText}`);
         }
 
-        const session = sessions[0];
+        const session = await response.json();
         if (cancelled) return;
 
         // Check if the session has ended
