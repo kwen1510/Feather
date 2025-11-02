@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
-import { supabase } from '../supabaseClient';
+import { sql } from '../db/client';
+import type { Question } from '../db/client';
 
 export const useQuestions = (sessionId: string | null) => {
   return useQuery({
@@ -9,19 +10,14 @@ export const useQuestions = (sessionId: string | null) => {
         return [];
       }
 
-      const { data, error } = await supabase
-        .from('questions')
-        .select('*')
-        .eq('session_id', sessionId)
-        .order('question_number', { ascending: true });
+      const results = await sql`
+        SELECT * FROM questions
+        WHERE session_id = ${sessionId}
+        ORDER BY question_number ASC
+      `;
 
-      if (error) {
-        throw error;
-      }
-
-      return data || [];
+      return results as Question[];
     },
     enabled: !!sessionId,
   });
 };
-

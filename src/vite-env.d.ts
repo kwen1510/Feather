@@ -1,14 +1,11 @@
 /// <reference types="vite/client" />
 
 interface ImportMetaEnv {
-  readonly VITE_SUPABASE_URL: string;
-  readonly VITE_SUPABASE_ANON_KEY: string;
-  readonly SUPABASE_URL?: string;
-  readonly SUPABASE_ANON_KEY?: string;
+  readonly VITE_POSTGRES_URL?: string;
+  readonly POSTGRES_URL?: string;
   readonly ABLY_API_KEY?: string;
 }
 
 interface ImportMeta {
   readonly env: ImportMetaEnv;
 }
-

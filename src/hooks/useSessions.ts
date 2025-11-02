@@ -1,21 +1,17 @@
 import { useQuery } from '@tanstack/react-query';
-import { supabase } from '../supabaseClient';
+import { sql } from '../db/client';
+import type { Session } from '../db/client';
 
 export const useSessions = () => {
   return useQuery({
     queryKey: ['sessions'],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('sessions')
-        .select('*')
-        .order('created_at', { ascending: false });
+      const results = await sql`
+        SELECT * FROM sessions
+        ORDER BY created_at DESC
+      `;
 
-      if (error) {
-        throw error;
-      }
-
-      return data || [];
+      return results as Session[];
     },
   });
 };
-

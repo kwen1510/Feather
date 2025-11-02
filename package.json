@@ -7,12 +7,12 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "server": "tsx server.ts",
     "test:e2e": "playwright test",
     "test:e2e:remote": "playwright test -c PLAYWRIGHT/playwright.config.ts"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.76.1",
+    "@neondatabase/serverless": "^0.11.5",
+    "@vercel/postgres": "^0.12.1",
     "ably": "^1.2.46",
     "dotenv": "^17.2.3",
     "heic2any": "^0.0.4",

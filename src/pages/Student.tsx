@@ -3,7 +3,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { Stage, Layer, Line, Image as KonvaImage } from 'react-konva';
 import * as Ably from 'ably';
-import { supabase } from '../supabaseClient';
+import { sql } from '../db/client';
 import { Pen, Eraser, Undo, Redo, Trash2, Pointer, Feather } from 'lucide-react';
 import { getOrCreateStudentId } from '../utils/identity';
 import { initDB, saveStroke as saveStrokeToIndexedDB, loadStrokes as loadStrokesFromIndexedDB, clearStrokes as clearStrokesFromIndexedDB, validateSession, replaceAllStrokes as replaceAllStrokesInIndexedDB } from '../utils/indexedDB';
@@ -362,18 +362,12 @@ const Student: React.FC = () => {
     const validateSession = async () => {
       try {
         // Check if session exists for this room (case-insensitive)
-        const { data: sessions, error: sessionError } = await supabase
-          .from('sessions')
-          .select('*')
-          .ilike('room_code', roomId)
-          .order('created_at', { ascending: false })
-          .limit(1);
-
-        if (sessionError) {
-          console.error('Session query error:', sessionError);
-          setSessionStatus('no-session');
-          return;
-        }
+        const sessions = await sql`
+          SELECT * FROM sessions
+          WHERE room_code ILIKE ${roomId}
+          ORDER BY created_at DESC
+          LIMIT 1
+        `;
 
         if (!sessions || sessions.length === 0) {
           console.log('No session found for room code:', roomId);

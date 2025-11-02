@@ -1,19 +1,13 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { createClient } from '@supabase/supabase-js';
-
-// Initialize Supabase client
-const supabase = createClient(
-  process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || '',
-  process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || ''
-);
+import { Pool } from '@neondatabase/serverless';
 
 interface Participant {
   id: string;
   session_id: string;
   client_id: string;
-  student_id: string;
+  student_id: string | null;
   role: string;
-  name: string;
+  name: string | null;
 }
 
 interface Question {
@@ -21,8 +15,8 @@ interface Question {
   session_id: string;
   question_number: number;
   content_type: string;
-  template_type?: string;
-  image_data?: unknown;
+  template_type?: string | null;
+  image_data?: unknown | null;
 }
 
 interface StudentData {
@@ -43,9 +37,10 @@ interface PersistBody {
 }
 
 /**
- * Get or create a participant record in Supabase
+ * Get or create a participant record in Neon
  */
 async function getOrCreateParticipant(
+  pool: Pool,
   sessionId: string,
   studentId: string,
   name: string,
@@ -53,57 +48,48 @@ async function getOrCreateParticipant(
 ): Promise<Participant> {
   try {
     // First try to find existing participant
-    const { data: existing, error: findError } = await supabase
-      .from('participants')
-      .select('*')
-      .eq('session_id', sessionId)
-      .eq('student_id', studentId)
-      .maybeSingle();
+    const existingResult = await pool.query(
+      `SELECT * FROM participants 
+       WHERE session_id = $1 AND student_id = $2`,
+      [sessionId, studentId]
+    );
 
-    if (findError && findError.code !== 'PGRST116') {
-      console.error('Error finding participant:', findError);
-      throw findError;
-    }
-
-    if (existing) {
+    if (existingResult.rows.length > 0) {
+      const existing = existingResult.rows[0] as Participant;
+      
+      // Update name if it has changed
       if (name && existing.name !== name) {
-        const { data: updated, error: updateError } = await supabase
-          .from('participants')
-          .update({ name })
-          .eq('id', existing.id)
-          .select()
-          .single();
-
-        if (updateError) {
-          console.error('Error updating participant name:', updateError);
-          return existing as Participant;
+        const updateResult = await pool.query(
+          `UPDATE participants 
+           SET name = $1 
+           WHERE id = $2 
+           RETURNING *`,
+          [name, existing.id]
+        );
+        
+        if (updateResult.rows.length > 0) {
+          return updateResult.rows[0] as Participant;
         }
-
-        return updated as Participant;
+        return existing;
       }
 
-      return existing as Participant;
+      return existing;
     }
 
     // Create new participant
-    const { data: newParticipant, error: insertError } = await supabase
-      .from('participants')
-      .insert([{
-        session_id: sessionId,
-        client_id: `${role}-${Date.now()}`,
-        student_id: studentId,
-        role: role,
-        name: name,
-      }])
-      .select()
-      .single();
+    const clientId = `${role}-${Date.now()}`;
+    const insertResult = await pool.query(
+      `INSERT INTO participants (session_id, client_id, student_id, role, name)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING *`,
+      [sessionId, clientId, studentId, role, name]
+    );
 
-    if (insertError) {
-      console.error('Error creating participant:', insertError);
-      throw insertError;
+    if (insertResult.rows.length === 0) {
+      throw new Error('Failed to create participant');
     }
 
-    return newParticipant as Participant;
+    return insertResult.rows[0] as Participant;
   } catch (error) {
     console.error('getOrCreateParticipant error:', error);
     throw error;
@@ -111,60 +97,44 @@ async function getOrCreateParticipant(
 }
 
 /**
- * Save a question to Supabase
+ * Save a question to Neon
  */
-async function saveQuestionToSupabase(
+async function saveQuestion(
+  pool: Pool,
   sessionId: string,
   questionNumber: number,
   contentType: string | undefined,
   content: { type?: string; [key: string]: unknown } | undefined
 ): Promise<Question> {
   try {
-    const questionData: {
-      session_id: string;
-      question_number: number;
-      content_type: string;
-      template_type?: string;
-      image_data?: unknown;
-    } = {
-      session_id: sessionId,
-      question_number: questionNumber,
-      content_type: contentType || 'blank',
-    };
+    const finalContentType = contentType || 'blank';
+    const templateType = (contentType === 'template' && content?.type) ? content.type : null;
+    const imageData = (contentType === 'image' && content) ? JSON.stringify(content) : null;
 
-    // Add template type if it's a template
-    if (contentType === 'template' && content?.type) {
-      questionData.template_type = content.type;
+    const result = await pool.query(
+      `INSERT INTO questions (session_id, question_number, content_type, template_type, image_data)
+       VALUES ($1, $2, $3, $4, $5::jsonb)
+       RETURNING *`,
+      [sessionId, questionNumber, finalContentType, templateType, imageData]
+    );
+
+    if (result.rows.length === 0) {
+      throw new Error('Failed to save question');
     }
 
-    // Add image data if it's an image
-    if (contentType === 'image' && content) {
-      questionData.image_data = content;
-    }
-
-    const { data, error } = await supabase
-      .from('questions')
-      .insert([questionData])
-      .select()
-      .single();
-
-    if (error) {
-      console.error('Error saving question:', error);
-      throw error;
-    }
-
-    console.log(`✅ Saved question ${questionNumber} to Supabase`);
-    return data as Question;
+    console.log(`✅ Saved question ${questionNumber} to Neon`);
+    return result.rows[0] as Question;
   } catch (error) {
-    console.error('saveQuestionToSupabase error:', error);
+    console.error('saveQuestion error:', error);
     throw error;
   }
 }
 
 /**
- * Save annotations (student lines + teacher annotations) to Supabase
+ * Save annotations (student lines + teacher annotations) to Neon
  */
-async function saveAnnotationsToSupabase(
+async function saveAnnotations(
+  pool: Pool,
   sessionId: string,
   questionId: string,
   participantId: string,
@@ -173,42 +143,36 @@ async function saveAnnotationsToSupabase(
 ): Promise<boolean> {
   try {
     // Check if annotation already exists
-    const { data: existing } = await supabase
-      .from('annotations')
-      .select('id')
-      .eq('participant_id', participantId)
-      .eq('question_id', questionId)
-      .maybeSingle();
+    const existingResult = await pool.query(
+      `SELECT id FROM annotations 
+       WHERE participant_id = $1 AND question_id = $2`,
+      [participantId, questionId]
+    );
 
-    if (existing) {
+    const studentLinesJson = JSON.stringify(studentLines || []);
+    const teacherAnnotationsJson = JSON.stringify(teacherAnnotations || []);
+
+    if (existingResult.rows.length > 0) {
       // Update existing annotation
-      const { error } = await supabase
-        .from('annotations')
-        .update({
-          student_lines: studentLines || [],
-          teacher_annotations: teacherAnnotations || [],
-        })
-        .eq('id', existing.id);
-
-      if (error) throw error;
+      await pool.query(
+        `UPDATE annotations 
+         SET student_lines = $1::jsonb, 
+             teacher_annotations = $2::jsonb
+         WHERE id = $3`,
+        [studentLinesJson, teacherAnnotationsJson, existingResult.rows[0].id]
+      );
     } else {
       // Insert new annotation
-      const { error } = await supabase
-        .from('annotations')
-        .insert([{
-          session_id: sessionId,
-          participant_id: participantId,
-          question_id: questionId,
-          student_lines: studentLines || [],
-          teacher_annotations: teacherAnnotations || [],
-        }]);
-
-      if (error) throw error;
+      await pool.query(
+        `INSERT INTO annotations (session_id, participant_id, question_id, student_lines, teacher_annotations)
+         VALUES ($1, $2, $3, $4::jsonb, $5::jsonb)`,
+        [sessionId, participantId, questionId, studentLinesJson, teacherAnnotationsJson]
+      );
     }
 
     return true;
   } catch (error) {
-    console.error('saveAnnotationsToSupabase error:', error);
+    console.error('saveAnnotations error:', error);
     throw error;
   }
 }
@@ -230,6 +194,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return;
   }
 
+  // Create pool inside handler for serverless environment
+  const connectionString = process.env.POSTGRES_URL;
+  if (!connectionString) {
+    res.status(500).json({ error: 'POSTGRES_URL environment variable is not set' });
+    return;
+  }
+
+  const pool = new Pool({ connectionString });
+
   try {
     const body = req.body as PersistBody;
     const { sessionId, questionNumber, contentType, content, studentsData } = body;
@@ -241,8 +214,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     console.log(`📝 Persisting question ${questionNumber} for session ${sessionId}`);
 
-    // Step 1: Create the question in Supabase
-    const question = await saveQuestionToSupabase(sessionId, questionNumber, contentType, content);
+    // Step 1: Create the question
+    const question = await saveQuestion(pool, sessionId, questionNumber, contentType, content);
 
     // Step 2: Save all student data provided from IndexedDB
     // studentsData format: { studentId: { studentLines, teacherAnnotations, studentName } }
@@ -256,14 +229,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if ((studentLines && studentLines.length > 0) || (teacherAnnotations && teacherAnnotations.length > 0)) {
           // Get or create participant
           const participant = await getOrCreateParticipant(
+            pool,
             sessionId,
             studentId,
             studentName,
             'student'
           );
 
-          // Save annotations to Supabase
-          await saveAnnotationsToSupabase(
+          // Save annotations
+          await saveAnnotations(
+            pool,
             sessionId,
             question.id,
             participant.id,
@@ -287,6 +262,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const errorMessage = err instanceof Error ? err.message : 'Unknown error';
     console.error('Persist strokes error:', err);
     res.status(500).json({ error: 'Failed to persist strokes', details: errorMessage });
+  } finally {
+    // End the pool to release connections
+    await pool.end();
   }
 }
-

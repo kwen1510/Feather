@@ -76,7 +76,7 @@ For detailed instructions, see **[VERCEL_DEPLOY.md](VERCEL_DEPLOY.md)**
 - **Real-time Synchronization**: Instant updates across all connected clients via Ably
 - **Drawing Tools**: Pen and eraser with undo/redo functionality
 - **Layer Isolation**: Teachers cannot edit student work and vice versa
-- **Data Persistence**: Save sessions and responses to Supabase
+- **Data Persistence**: Save sessions and responses to Neon Postgres
 - **History View**: Review past sessions and student responses
 
 ## Tech Stack
@@ -84,7 +84,7 @@ For detailed instructions, see **[VERCEL_DEPLOY.md](VERCEL_DEPLOY.md)**
 - **Frontend**: React 19 + Vite
 - **Canvas**: Konva.js + react-konva
 - **Real-time**: Ably Realtime SDK
-- **Database**: Supabase (PostgreSQL)
+- **Database**: Neon Postgres (via Vercel integration)
 - **Backend**: Vercel Serverless Functions
 - **Deployment**: Vercel
 
@@ -92,22 +92,35 @@ For detailed instructions, see **[VERCEL_DEPLOY.md](VERCEL_DEPLOY.md)**
 
 ### Run the application locally
 
+**Recommended: Use Vercel CLI (matches production environment)**
+
 ```bash
 # Install dependencies
 npm install
 
-# Start development server
-npm run dev
+# Install Vercel CLI globally (if not already installed)
+npm i -g vercel
 
-# In another terminal, start the local API server (optional)
-npm run server
+# Run local development server (runs frontend + serverless functions)
+vercel dev
 ```
 
-The app will be available at `http://localhost:5000`
+This will:
+- Start the Vite dev server for the frontend
+- Run serverless functions (`api/token.ts` and `api/strokes/persist.ts`) locally
+- Match production behavior exactly
+
+**Alternative: Frontend only (API calls won't work)**
+
+```bash
+npm run dev
+```
+
+The app will be available at `http://localhost:5000` (or the port Vercel assigns)
 
 **Note**: For local development, you'll need to:
 - Create a `.env.local` file with your environment variables (see `VERCEL_ENV.md`)
-- Or use Vercel CLI: `vercel dev` (runs serverless functions locally)
+- Or `vercel dev` will use environment variables from your Vercel project
 
 ## Deployment
 
@@ -126,8 +139,7 @@ See **[VERCEL_DEPLOY.md](VERCEL_DEPLOY.md)** for complete instructions.
 
 Required environment variables:
 - `ABLY_API_KEY` - Ably API key for real-time messaging
-- `VITE_SUPABASE_URL` - Supabase project URL
-- `VITE_SUPABASE_ANON_KEY` - Supabase anonymous key
+- `POSTGRES_URL` - Neon Postgres connection string (auto-configured via Vercel)
 
 See **[VERCEL_ENV.md](VERCEL_ENV.md)** for details.
 
@@ -143,7 +155,7 @@ See **[VERCEL_ENV.md](VERCEL_ENV.md)** for details.
 - Node.js (v18 or higher)
 - A Vercel account ([Sign up free](https://vercel.com/signup))
 - An Ably account ([Get free tier](https://ably.com))
-- A Supabase project ([Get free tier](https://supabase.com))
+- A Neon Postgres database (via Vercel integration)
 
 ## How It Works
 
@@ -156,7 +168,7 @@ Vercel Edge Network (CDN)
     ├─→ Static Files (React App)
     └─→ /api/* → Serverless Functions
                       ├─→ /api/token → Ably Authentication
-                      └─→ /api/strokes/persist → Supabase Storage
+                      └─→ /api/strokes/persist → Neon Postgres
 ```
 
 ### Real-time Sync
@@ -173,7 +185,7 @@ Vercel Edge Network (CDN)
 |---------|-----------|------|
 | **Vercel** | Unlimited personal projects | $20/month (Pro) |
 | **Ably** | 3M messages/month | $29+/month |
-| **Supabase** | 500MB database, 2GB bandwidth | $25+/month |
+| **Neon Postgres** | 512MB database, autoscaling | $19+/month |
 | **Total** | **Free** (for small scale) | **$44+/month** (scaled) |
 
 ## Support
@@ -193,7 +205,7 @@ Built with:
 - [Vite](https://vitejs.dev/) - Build tool
 - [Konva.js](https://konvajs.org/) - Canvas library
 - [Ably](https://ably.com/) - Real-time messaging
-- [Supabase](https://supabase.com/) - Database and backend
+- [Neon](https://neon.tech/) - Serverless Postgres database
 - [Vercel](https://vercel.com/) - Deployment platform
 
 ---

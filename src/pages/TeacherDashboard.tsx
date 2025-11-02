@@ -7,7 +7,7 @@ import { Feather } from 'lucide-react';
 import StudentCard from '../components/StudentCard';
 import AnnotationModal from '../components/AnnotationModal';
 import { resizeAndCompressImage } from '../utils/imageUtils';
-import { supabase } from '../supabaseClient';
+import { sql } from '../db/client';
 import { initDB, saveStroke as saveStrokeToIndexedDB, loadStrokes as loadStrokesFromIndexedDB, clearStrokes as clearStrokesFromIndexedDB, validateSession, replaceAllStrokes as replaceAllStrokesInIndexedDB, loadAllTeacherAnnotations } from '../utils/indexedDB';
 import './TeacherDashboard.css';
 
@@ -222,13 +222,11 @@ const TeacherDashboard: React.FC = () => {
         }
       }
 
-      await supabase
-        .from('sessions')
-        .update({
-          status: 'ended',
-          ended_at: new Date().toISOString(),
-        })
-        .eq('id', sessionId);
+      await sql`
+        UPDATE sessions
+        SET status = 'ended', ended_at = ${new Date().toISOString()}
+        WHERE id = ${sessionId}
+      `;
 
       // Publish session-ended event
       if (channel) {
@@ -291,18 +289,13 @@ const TeacherDashboard: React.FC = () => {
 
     const initializeSession = async () => {
       try {
-        const { data: existingSessions, error: queryError } = await supabase
-          .from('sessions')
-          .select('*')
-          .ilike('room_code', roomId)
-          .order('created_at', { ascending: false })
-          .limit(1);
-
-        if (queryError) {
-          console.error('Failed to query sessions:', queryError);
-          markIdleIfCurrentRoom();
-          return;
-        }
+        // Query existing sessions (case-insensitive)
+        const existingSessions = await sql`
+          SELECT * FROM sessions
+          WHERE room_code ILIKE ${roomId}
+          ORDER BY created_at DESC
+          LIMIT 1
+        `;
 
         let session = null;
 
@@ -310,54 +303,45 @@ const TeacherDashboard: React.FC = () => {
           const existingSession = existingSessions[0];
 
           if (existingSession.status === 'ended') {
-            const { data: updatedSession, error: updateError } = await supabase
-              .from('sessions')
-              .update({
-                status: 'created',
-                started_at: null,
-                ended_at: null,
-              })
-              .eq('id', existingSession.id)
-              .select()
-              .single();
+            const updatedSessions = await sql`
+              UPDATE sessions
+              SET status = 'created', started_at = NULL, ended_at = NULL
+              WHERE id = ${existingSession.id}
+              RETURNING *
+            `;
 
-            if (updateError) {
-              console.error('Failed to update session:', updateError);
+            if (updatedSessions && updatedSessions.length > 0) {
+              session = updatedSessions[0];
+            } else {
+              console.error('Failed to update session');
               markIdleIfCurrentRoom();
               return;
             }
-
-            session = updatedSession;
           } else {
             session = existingSession;
           }
         } else {
-          const { data: newSession, error: insertError } = await supabase
-            .from('sessions')
-            .insert([
-              {
-                room_code: roomId,
-                status: 'created',
-              }
-            ])
-            .select()
-            .single();
+          try {
+            const newSessions = await sql`
+              INSERT INTO sessions (room_code, status)
+              VALUES (${roomId}, 'created')
+              RETURNING *
+            `;
 
-          if (insertError) {
-            if (insertError.code === '23505') {
-
-              const { data: conflictSessions, error: conflictFetchError } = await supabase
-                .from('sessions')
-                .select('*')
-                .ilike('room_code', roomId)
-                .order('created_at', { ascending: false })
-                .limit(1);
-
-              if (conflictFetchError) {
-                console.error('Failed to load existing session after duplicate key error:', conflictFetchError);
-                markIdleIfCurrentRoom();
-                return;
-              }
+            if (newSessions && newSessions.length > 0) {
+              session = newSessions[0];
+            } else {
+              throw new Error('No session returned from insert');
+            }
+          } catch (insertError: any) {
+            // Handle duplicate key error (23505)
+            if (insertError.code === '23505' || insertError.message?.includes('duplicate')) {
+              const conflictSessions = await sql`
+                SELECT * FROM sessions
+                WHERE room_code ILIKE ${roomId}
+                ORDER BY created_at DESC
+                LIMIT 1
+              `;
 
               if (conflictSessions && conflictSessions.length > 0) {
                 session = conflictSessions[0];
@@ -371,8 +355,6 @@ const TeacherDashboard: React.FC = () => {
               markIdleIfCurrentRoom();
               return;
             }
-          } else {
-            session = newSession;
           }
         }
 
@@ -1465,15 +1447,13 @@ const TeacherDashboard: React.FC = () => {
 
       if (isFirstContent) {
         // Update session to 'active'
-        const { error: sessionError } = await supabase
-          .from('sessions')
-          .update({
-            status: 'active',
-            started_at: new Date().toISOString(),
-          })
-          .eq('id', sessionId);
-
-        if (sessionError) {
+        try {
+          await sql`
+            UPDATE sessions
+            SET status = 'active', started_at = ${new Date().toISOString()}
+            WHERE id = ${sessionId}
+          `;
+        } catch (sessionError) {
           console.error('Failed to start session:', sessionError);
           setImageMessage('Failed to start session. Please try again.');
           return;
