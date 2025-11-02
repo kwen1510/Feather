@@ -4,12 +4,6 @@
   "outputDirectory": "dist",
   "framework": "vite",
   "regions": ["iad1"],
-  "rewrites": [
-    {
-      "source": "/(.*)",
-      "destination": "/index.html"
-    }
-  ],
   "functions": {
     "api/token.ts": {
       "maxDuration": 10
