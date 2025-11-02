@@ -4,8 +4,35 @@ import heic2any from 'heic2any';
 const MB = 1024 * 1024;
 const TARGET_BASE64_BYTES = 50 * 1024; // 50KB encoded (leaves headroom under 64KB limit)
 
+interface CompressionStep {
+  dimension: number;
+  quality: number;
+}
+
+interface ResampleOptions {
+  maxDimension: number;
+  quality: number;
+  targetType?: string;
+  force?: boolean;
+}
+
+interface CompressionResult {
+  file: File;
+  dataUrl: string;
+  encodedBytes: number;
+  withinLimit: boolean;
+}
+
+interface ProcessedImage {
+  blob: File;
+  dataUrl: string;
+  width: number;
+  height: number;
+  size: number;
+}
+
 // Multi-step compression strategy (from iPad tool)
-const COMPRESSION_STEPS = [
+const COMPRESSION_STEPS: CompressionStep[] = [
   { dimension: 1400, quality: 0.55 },
   { dimension: 1100, quality: 0.5 },
   { dimension: 920, quality: 0.46 },
@@ -21,22 +48,22 @@ const COMPRESSION_STEPS = [
 ];
 
 // Helper: replace file extension
-const replaceExtension = (name, newExt) => {
+const replaceExtension = (name: string, newExt: string): string => {
   const idx = name.lastIndexOf('.');
   return idx === -1 ? `${name}.${newExt}` : `${name.slice(0, idx)}.${newExt}`;
 };
 
 // Helper: convert blob to data URL
-const blobToDataUrl = (blob) =>
+const blobToDataUrl = (blob: Blob): Promise<string> =>
   new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onerror = () => reject(reader.error);
-    reader.onload = () => resolve(reader.result);
+    reader.onload = () => resolve(reader.result as string);
     reader.readAsDataURL(blob);
   });
 
 // Helper: load image from blob
-const loadImage = (blob) =>
+const loadImage = (blob: Blob): Promise<HTMLImageElement> =>
   new Promise((resolve, reject) => {
     const url = URL.createObjectURL(blob);
     const img = new Image();
@@ -52,14 +79,14 @@ const loadImage = (blob) =>
   });
 
 // Helper: calculate data URL size in bytes
-const dataUrlBytes = (dataUrl) => new Blob([dataUrl]).size;
+const dataUrlBytes = (dataUrl: string): number => new Blob([dataUrl]).size;
 
 // Helper: convert blob to File
-const toFile = (input, name, type) =>
+const toFile = (input: Blob | File, name: string, type: string): File =>
   input instanceof File && input.type === type ? input : new File([input], name, { type });
 
 // Core: resample image with canvas
-const resampleImage = async (blob, opts) => {
+const resampleImage = async (blob: Blob, opts: ResampleOptions): Promise<Blob> => {
   if (!blob.type.startsWith('image/') || blob.type === 'image/gif') {
     return blob;
   }
@@ -109,7 +136,7 @@ const resampleImage = async (blob, opts) => {
 };
 
 // Core: aggressive multi-step compression
-const aggressivelyCompress = async (file) => {
+const aggressivelyCompress = async (file: File): Promise<CompressionResult> => {
   let current = file;
   let dataUrl = await blobToDataUrl(current);
   let encodedBytes = dataUrlBytes(dataUrl);
@@ -151,10 +178,10 @@ const aggressivelyCompress = async (file) => {
 };
 
 // Main export: process and compress image (replaces old resizeAndCompressImage)
-export const resizeAndCompressImage = async (file) => {
+export const resizeAndCompressImage = async (file: File): Promise<ProcessedImage> => {
   console.log('📸 Processing image:', file.name, file.type, `${(file.size / MB).toFixed(2)} MB`);
 
-  let workingFile = file;
+  let workingFile: Blob | File = file;
   let mimeType = file.type;
   let fileName = file.name || 'photo.jpg';
 
@@ -169,13 +196,14 @@ export const resizeAndCompressImage = async (file) => {
         quality: 0.92,
       });
       const heicBlob = Array.isArray(converted) ? converted[0] : converted;
-      workingFile = heicBlob;
-      mimeType = heicBlob.type || 'image/jpeg';
+      workingFile = heicBlob as Blob;
+      mimeType = (heicBlob as Blob).type || 'image/jpeg';
       fileName = replaceExtension(fileName, 'jpg');
       console.log('✅ HEIC converted to JPEG');
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       console.error('❌ HEIC conversion failed:', error);
-      throw new Error(`Failed to convert HEIC image: ${error.message}. Try using a different image format.`);
+      throw new Error(`Failed to convert HEIC image: ${errorMessage}. Try using a different image format.`);
     }
   }
 
@@ -233,3 +261,4 @@ export const resizeAndCompressImage = async (file) => {
     size: compressedFile.size,
   };
 };
+

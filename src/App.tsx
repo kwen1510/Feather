@@ -8,7 +8,7 @@ import TestStudent from './pages/TestStudent';
 import TestTeacher from './pages/TestTeacher';
 import History from './pages/History';
 
-function App() {
+const App: React.FC = () => {
   return (
     <Router>
       <Routes>
@@ -22,6 +22,7 @@ function App() {
       </Routes>
     </Router>
   );
-}
+};
 
 export default App;
+

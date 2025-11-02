@@ -1,10 +1,11 @@
+// @ts-nocheck
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import './StudentLogin.css';
 
 const FEATHER_USERNAME_KEY = 'Feather_username';
 
-function StudentLogin() {
+const StudentLogin: React.FC = () => {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
 
@@ -26,7 +27,7 @@ function StudentLogin() {
     }
   }, [searchParams]);
 
-  const handleSubmit = async (e) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
     // Validation
@@ -55,7 +56,7 @@ function StudentLogin() {
       });
 
       // Wait for connection with timeout
-      await new Promise((resolve, reject) => {
+      await new Promise<void>((resolve, reject) => {
         const timeout = setTimeout(() => reject(new Error('Connection timeout')), 8000);
         ably.connection.once('connected', () => {
           clearTimeout(timeout);
@@ -135,6 +136,7 @@ function StudentLogin() {
       </div>
     </div>
   );
-}
+};
 
 export default StudentLogin;
+

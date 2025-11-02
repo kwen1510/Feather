@@ -1,3 +1,4 @@
+// @ts-nocheck
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import Ably from 'ably/promises';
@@ -13,7 +14,7 @@ import './TeacherDashboard.css';
 // Generate unique stroke ID
 const generateStrokeId = () => `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
-const TeacherDashboard = () => {
+const TestTeacher: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
 
@@ -54,8 +55,8 @@ const TeacherDashboard = () => {
 
   // Ably connection
   const [ably, setAbly] = useState(null);
-  const [studentChannel, setStudentChannel] = useState(null); // For receiving student messages
-  const [teacherChannel, setTeacherChannel] = useState(null); // For publishing teacher messages
+  const [studentChannel, setStudentChannel] = useState(null);
+  const [teacherChannel, setTeacherChannel] = useState(null);
   const [isConnected, setIsConnected] = useState(false);
   const [clientId] = useState(`teacher-${Math.random().toString(36).substring(7)}`);
 
@@ -575,7 +576,7 @@ const TeacherDashboard = () => {
 
         setAbly(ablyClient);
 
-        // Create separate channels for student receiving and teacher publishing
+        // Get channel
         const studentCh = ablyClient.channels.get(`${roomId}-student`);
         const teacherCh = ablyClient.channels.get(`${roomId}-teacher`);
 
@@ -583,7 +584,7 @@ const TeacherDashboard = () => {
 
         // Removed: Subscribe to stroke count updates (will be replaced with real-time stroke subscription)
 
-        // Listen for presence events (student connect/disconnect) on student channel
+        // Listen for presence events (student connect/disconnect)
         studentCh.presence.subscribe('enter', (member) => {
           // Skip non-student members
           if (!member.clientId || member.clientId === clientId || !member.clientId.includes('student')) {
@@ -1723,7 +1724,7 @@ const TeacherDashboard = () => {
                 <span className="pill-value">{roomId}</span>
               </div>
               <div className="status-group">
-                <span className="status-pill session-pill">Session live</span>
+                <span className="status-pill session-pill" style={{backgroundColor: '#FF9500'}}>TEST MODE</span>
                 <span className={`status-pill connection-pill ${isConnected ? 'online' : 'offline'}`}>
                   {isConnected ? 'Connected' : 'Disconnected'}
                 </span>
@@ -2094,4 +2095,4 @@ const TeacherDashboard = () => {
   );
 };
 
-export default TeacherDashboard;
+export default TestTeacher;

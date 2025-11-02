@@ -273,7 +273,7 @@ const ResponseCard = ({ response, background }) => {
   );
 };
 
-const History = () => {
+const History: React.FC = () => {
   const [sessions, setSessions] = useState([]);
   const [sessionsLoading, setSessionsLoading] = useState(true);
   const [sessionsError, setSessionsError] = useState(null);

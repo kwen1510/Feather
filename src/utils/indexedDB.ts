@@ -8,13 +8,30 @@ const DB_VERSION = 1;
 const TEACHER_STORE = 'teacher-strokes';
 const STUDENT_STORE = 'student-strokes';
 
-let dbInstance = null;
+interface Stroke {
+  strokeId?: string;
+  timestamp?: number;
+  [key: string]: unknown;
+}
+
+interface StrokeData {
+  id: string;
+  roomId: string;
+  userId: string;
+  sessionId: string | null;
+  stroke: Stroke;
+  timestamp: number;
+}
+
+type UserType = 'teacher' | 'student';
+
+let dbInstance: IDBDatabase | null = null;
 
 /**
  * Initialize IndexedDB with object stores for teacher and student strokes
  * @returns {Promise<IDBDatabase>}
  */
-export const initDB = () => {
+export const initDB = (): Promise<IDBDatabase> => {
   return new Promise((resolve, reject) => {
     if (dbInstance) {
       resolve(dbInstance);
@@ -35,7 +52,7 @@ export const initDB = () => {
     };
 
     request.onupgradeneeded = (event) => {
-      const db = event.target.result;
+      const db = (event.target as IDBOpenDBRequest).result;
 
       // Create teacher strokes store if it doesn't exist
       if (!db.objectStoreNames.contains(TEACHER_STORE)) {
@@ -66,7 +83,13 @@ export const initDB = () => {
  * @param {string} sessionId - The session ID (to validate on reload)
  * @returns {Promise<void>}
  */
-export const saveStroke = async (stroke, roomId, userId, userType, sessionId = null) => {
+export const saveStroke = async (
+  stroke: Stroke,
+  roomId: string,
+  userId: string,
+  userType: UserType,
+  sessionId: string | null = null
+): Promise<void> => {
   try {
     const db = await initDB();
     const storeName = userType === 'teacher' ? TEACHER_STORE : STUDENT_STORE;
@@ -77,7 +100,7 @@ export const saveStroke = async (stroke, roomId, userId, userType, sessionId = n
     // Create a unique ID for this stroke
     const id = `${roomId}:${userId}:${stroke.strokeId || Date.now()}`;
 
-    const strokeData = {
+    const strokeData: StrokeData = {
       id,
       roomId,
       userId,
@@ -108,7 +131,11 @@ export const saveStroke = async (stroke, roomId, userId, userType, sessionId = n
  * @param {string} userType - 'teacher' or 'student'
  * @returns {Promise<Array>} Array of stroke objects
  */
-export const loadStrokes = async (roomId, userId, userType) => {
+export const loadStrokes = async (
+  roomId: string,
+  userId: string,
+  userType: UserType
+): Promise<Stroke[]> => {
   try {
     const db = await initDB();
     const storeName = userType === 'teacher' ? TEACHER_STORE : STUDENT_STORE;
@@ -121,7 +148,7 @@ export const loadStrokes = async (roomId, userId, userType) => {
     
     return new Promise((resolve, reject) => {
       request.onsuccess = () => {
-        const allStrokes = request.result || [];
+        const allStrokes = (request.result || []) as StrokeData[];
         // Filter by userId and extract just the stroke objects
         const userStrokes = allStrokes
           .filter(item => item.userId === userId)
@@ -148,7 +175,9 @@ export const loadStrokes = async (roomId, userId, userType) => {
  * @param {string} roomId - The room ID
  * @returns {Promise<Object>} Object with studentId as keys and annotation arrays as values
  */
-export const loadAllTeacherAnnotations = async (roomId) => {
+export const loadAllTeacherAnnotations = async (
+  roomId: string
+): Promise<Record<string, Stroke[]>> => {
   try {
     const db = await initDB();
     const transaction = db.transaction([TEACHER_STORE], 'readonly');
@@ -159,10 +188,10 @@ export const loadAllTeacherAnnotations = async (roomId) => {
     
     return new Promise((resolve, reject) => {
       request.onsuccess = () => {
-        const allRecords = request.result || [];
+        const allRecords = (request.result || []) as StrokeData[];
         
         // Group by studentId (extract from userId like "teacher:student-abc123")
-        const grouped = {};
+        const grouped: Record<string, Stroke[]> = {};
         
         allRecords.forEach(record => {
           // userId format: "teacher:studentId"
@@ -211,7 +240,11 @@ export const loadAllTeacherAnnotations = async (roomId) => {
  * @param {string} userType - 'teacher' or 'student'
  * @returns {Promise<void>}
  */
-export const clearStrokes = async (roomId, userId, userType) => {
+export const clearStrokes = async (
+  roomId: string,
+  userId: string,
+  userType: UserType
+): Promise<void> => {
   try {
     const db = await initDB();
     const storeName = userType === 'teacher' ? TEACHER_STORE : STUDENT_STORE;
@@ -224,7 +257,7 @@ export const clearStrokes = async (roomId, userId, userType) => {
     
     return new Promise((resolve, reject) => {
       request.onsuccess = (event) => {
-        const cursor = event.target.result;
+        const cursor = (event.target as IDBRequest<IDBCursorWithValue>).result;
         if (cursor) {
           // Only delete if it matches the userId
           if (cursor.value.userId === userId) {
@@ -256,7 +289,12 @@ export const clearStrokes = async (roomId, userId, userType) => {
  * @param {string} currentSessionId - The current session ID
  * @returns {Promise<boolean>} True if session is valid, false if cleared
  */
-export const validateSession = async (roomId, userId, userType, currentSessionId) => {
+export const validateSession = async (
+  roomId: string,
+  userId: string,
+  userType: UserType,
+  currentSessionId: string
+): Promise<boolean> => {
   try {
     const db = await initDB();
     const storeName = userType === 'teacher' ? TEACHER_STORE : STUDENT_STORE;
@@ -269,7 +307,7 @@ export const validateSession = async (roomId, userId, userType, currentSessionId
 
     return new Promise((resolve, reject) => {
       request.onsuccess = async () => {
-        const allStrokes = request.result || [];
+        const allStrokes = (request.result || []) as StrokeData[];
         // Filter by userId to get this user's strokes
         const userStrokes = allStrokes.filter(item => item.userId === userId);
 
@@ -319,7 +357,13 @@ export const validateSession = async (roomId, userId, userType, currentSessionId
  * @param {string} sessionId - The session ID
  * @returns {Promise<void>}
  */
-export const replaceAllStrokes = async (strokes, roomId, userId, userType, sessionId = null) => {
+export const replaceAllStrokes = async (
+  strokes: Stroke[],
+  roomId: string,
+  userId: string,
+  userType: UserType,
+  sessionId: string | null = null
+): Promise<void> => {
   try {
     const db = await initDB();
     const storeName = userType === 'teacher' ? TEACHER_STORE : STUDENT_STORE;
@@ -333,7 +377,7 @@ export const replaceAllStrokes = async (strokes, roomId, userId, userType, sessi
 
     const promises = strokes.map((stroke, index) => {
       const id = `${roomId}:${userId}:${stroke.strokeId || `${Date.now()}-${index}`}`;
-      const strokeData = {
+      const strokeData: StrokeData = {
         id,
         roomId,
         userId,
@@ -341,7 +385,7 @@ export const replaceAllStrokes = async (strokes, roomId, userId, userType, sessi
         stroke,
         timestamp: Date.now() + index // Ensure ordering
       };
-      return new Promise((resolve, reject) => {
+      return new Promise<void>((resolve, reject) => {
         const request = store.put(strokeData);
         request.onsuccess = () => resolve();
         request.onerror = () => reject(request.error);
@@ -360,7 +404,7 @@ export const replaceAllStrokes = async (strokes, roomId, userId, userType, sessi
  * Clear all data from IndexedDB (useful for debugging)
  * @returns {Promise<void>}
  */
-export const clearAllData = async () => {
+export const clearAllData = async (): Promise<void> => {
   try {
     const db = await initDB();
     const transaction = db.transaction([TEACHER_STORE, STUDENT_STORE], 'readwrite');
@@ -369,11 +413,11 @@ export const clearAllData = async () => {
     const studentStore = transaction.objectStore(STUDENT_STORE);
     
     await Promise.all([
-      new Promise((resolve) => {
-        teacherStore.clear().onsuccess = resolve;
+      new Promise<void>((resolve) => {
+        teacherStore.clear().onsuccess = () => resolve();
       }),
-      new Promise((resolve) => {
-        studentStore.clear().onsuccess = resolve;
+      new Promise<void>((resolve) => {
+        studentStore.clear().onsuccess = () => resolve();
       })
     ]);
     

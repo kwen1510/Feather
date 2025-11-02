@@ -1,3 +1,4 @@
+// @ts-nocheck
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { Stage, Layer, Line, Image as KonvaImage } from 'react-konva';
@@ -87,7 +88,7 @@ const SharedImageLayer = ({ sharedImage, canvasWidth, canvasHeight }) => {
   );
 };
 
-function Student() {
+const Student: React.FC = () => {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const roomId = searchParams.get('room');
@@ -1565,6 +1566,6 @@ function Student() {
       </div>
     </div>
   );
-}
+};
 
 export default Student;

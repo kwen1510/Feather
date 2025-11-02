@@ -1,6 +1,11 @@
 import React from 'react';
 
-const FlagIcon = ({ active = false, size = 20 }) => {
+interface FlagIconProps {
+  active?: boolean;
+  size?: number;
+}
+
+const FlagIcon: React.FC<FlagIconProps> = ({ active = false, size = 20 }) => {
   const stroke = active ? '#ff4d4f' : '#b8c1cc';
   const fill = active ? '#ff4d4f' : 'transparent';
 
@@ -31,3 +36,4 @@ const FlagIcon = ({ active = false, size = 20 }) => {
 };
 
 export default FlagIcon;
+

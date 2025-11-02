@@ -11,9 +11,46 @@ const colorOptions = [
   { label: 'Red', value: '#FF3B30' },
   { label: 'Purple', value: '#7C3AED' },
   { label: 'Teal', value: '#0EA5E9' },
-];
+] as const;
 
-const AnnotationModal = ({
+interface Line {
+  tool?: string;
+  points: number[];
+  color: string;
+  strokeWidth: number;
+  strokeId?: string;
+}
+
+interface SharedImage {
+  dataUrl: string;
+  width: number;
+  height: number;
+}
+
+interface Student {
+  clientId: string;
+  name?: string;
+  lines?: Line[];
+  studentId?: string;
+}
+
+interface AnnotationModalProps {
+  student: Student | null;
+  isOpen: boolean;
+  onClose: () => void;
+  onAnnotate: (annotations: Line[]) => void;
+  existingAnnotations?: Line[];
+  isFlagged?: boolean;
+  onToggleFlag?: (studentId: string) => void;
+  sharedImage?: SharedImage;
+  generateStrokeId?: () => string;
+}
+
+type Tool = 'pen' | 'eraser';
+type InputMode = 'all' | 'stylus-only';
+type ToolbarPosition = 'left' | 'right';
+
+const AnnotationModal: React.FC<AnnotationModalProps> = ({
   student,
   isOpen,
   onClose,
@@ -22,31 +59,31 @@ const AnnotationModal = ({
   isFlagged = false,
   onToggleFlag,
   sharedImage,
-  generateStrokeId, // Function to generate unique stroke IDs
+  generateStrokeId,
 }) => {
-  const [tool, setTool] = useState('pen');
-  const [color, setColor] = useState(colorOptions[0].value);
+  const [tool, setTool] = useState<Tool>('pen');
+  const [color, setColor] = useState<string>(colorOptions[0].value);
   const [brushSize, setBrushSize] = useState(3);
   const [isDrawing, setIsDrawing] = useState(false);
-  const [teacherAnnotations, setTeacherAnnotations] = useState([]);
-  const [inputMode, setInputMode] = useState('all'); // Changed from 'stylus-only' to allow mouse/touch by default
-  const [toolbarPosition, setToolbarPosition] = useState('left');
-  const [image, setImage] = useState(null);
+  const [teacherAnnotations, setTeacherAnnotations] = useState<Line[]>([]);
+  const [inputMode, setInputMode] = useState<InputMode>('all');
+  const [toolbarPosition, setToolbarPosition] = useState<ToolbarPosition>('left');
+  const [image, setImage] = useState<HTMLImageElement | null>(null);
   const [isMobile, setIsMobile] = useState(false);
 
-  const undoStack = useRef([]);
-  const redoStack = useRef([]);
+  const undoStack = useRef<Line[][]>([]);
+  const redoStack = useRef<Line[][]>([]);
   const eraserStateSaved = useRef(false);
-  const prevStudentIdRef = useRef(null);
+  const prevStudentIdRef = useRef<string | null>(null);
   const isFirstRender = useRef(true);
   const scrollPositionRef = useRef(0);
 
   // Performance optimization: keep current line in ref to avoid re-renders
-  const currentLineRef = useRef(null);
-  const animationFrameRef = useRef(null);
+  const currentLineRef = useRef<Line | null>(null);
+  const animationFrameRef = useRef<number | null>(null);
   
   // Ref to always access latest teacherAnnotations (prevents stale closure in callbacks)
-  const teacherAnnotationsRef = useRef(teacherAnnotations);
+  const teacherAnnotationsRef = useRef<Line[]>(teacherAnnotations);
 
   // Load shared image
   useEffect(() => {
@@ -62,8 +99,8 @@ const AnnotationModal = ({
     };
   }, [sharedImage]);
 
-  const canvasFrameRef = useRef(null);
-  const stageRef = useRef(null);
+  const canvasFrameRef = useRef<HTMLDivElement>(null);
+  const stageRef = useRef<any>(null);
   const [canvasSize, setCanvasSize] = useState({ width: 960, height: 720 });
 
   const scales = useMemo(
@@ -90,7 +127,14 @@ const AnnotationModal = ({
     try {
       const stored = localStorage.getItem(TEACHER_PREFS_KEY);
       if (stored) {
-        const prefs = JSON.parse(stored);
+        const prefs = JSON.parse(stored) as {
+          version?: number;
+          tool?: Tool;
+          color?: string;
+          brushSize?: number;
+          inputMode?: InputMode;
+          toolbarPosition?: ToolbarPosition;
+        };
         if (prefs.version !== PREFS_VERSION) {
           localStorage.removeItem(TEACHER_PREFS_KEY);
           return;
@@ -171,9 +215,9 @@ const AnnotationModal = ({
     const canvasFrame = canvasFrameRef.current;
 
     // Prevent touch events and gestures ONLY on canvas area, not buttons
-    const preventTouch = (e) => {
+    const preventTouch = (e: TouchEvent) => {
       // Only prevent if the touch is on the canvas area, not on buttons/sidebar
-      const target = e.target;
+      const target = e.target as HTMLElement;
       const isButton = target.closest('button') || target.closest('.annotation-sidebar') || target.closest('.annotation-status-actions');
 
       if (!isButton) {
@@ -181,11 +225,11 @@ const AnnotationModal = ({
       }
     };
 
-    const preventGesture = (e) => {
+    const preventGesture = (e: Event) => {
       e.preventDefault();
     };
 
-    const preventSelection = (e) => {
+    const preventSelection = (e: Event) => {
       if (isDrawing) {
         e.preventDefault();
         return false;
@@ -253,13 +297,13 @@ const AnnotationModal = ({
   }, [toolbarPosition, isOpen]);
 
   // Calculate image display position
-  const getImageLayout = () => {
+  const getImageLayout = (): { x: number; y: number; width: number; height: number } | null => {
     if (!sharedImage || !image) return null;
 
     const imageAspect = sharedImage.width / sharedImage.height;
     const canvasAspect = canvasSize.width / canvasSize.height;
 
-    let displayWidth, displayHeight, x, y;
+    let displayWidth: number, displayHeight: number, x: number, y: number;
 
     if (imageAspect > canvasAspect) {
       displayWidth = canvasSize.width;
@@ -280,27 +324,27 @@ const AnnotationModal = ({
 
   const imageLayout = getImageLayout();
 
-  const getStudentName = () => {
+  const getStudentName = (): string => {
     if (student.name) return student.name;
     if (!student.clientId) return 'Student';
     const match = student.clientId.match(/student-(\d+)/) || student.clientId.match(/load-test-student-(\d+)/);
     return match ? `Student ${match[1]}` : student.clientId;
   };
 
-  const isAllowedPointerEvent = (evt) => {
+  const isAllowedPointerEvent = (evt?: PointerEvent | TouchEvent): boolean => {
     if (inputMode !== 'stylus-only') return true;
-    return evt?.pointerType === 'pen';
+    return (evt as PointerEvent)?.pointerType === 'pen';
   };
 
-  const projectPoints = (points = []) =>
+  const projectPoints = (points: number[] = []): number[] =>
     points.map((value, index) => (index % 2 === 0 ? value * scales.x : value * scales.y));
 
-  const normalizePoint = (point) => ({ x: point.x / scales.x, y: point.y / scales.y });
+  const normalizePoint = (point: { x: number; y: number }) => ({ x: point.x / scales.x, y: point.y / scales.y });
 
-  const projectedStroke = (line) => (line.strokeWidth || 3) * scales.x;
+  const projectedStroke = (line: Line): number => (line.strokeWidth || 3) * scales.x;
 
-  const handlePointerDown = (e) => {
-    const evt = e.evt;
+  const handlePointerDown = (e: any) => {
+    const evt = e.evt as PointerEvent | TouchEvent;
 
     if (!isAllowedPointerEvent(evt)) {
       if (evt?.preventDefault) {
@@ -311,11 +355,11 @@ const AnnotationModal = ({
 
     // Capture pointer for smooth tracking
     const stage = e.target.getStage();
-    if (stage && evt.pointerId !== undefined) {
+    if (stage && (evt as PointerEvent).pointerId !== undefined) {
       const canvas = stage.content;
-      if (canvas && canvas.setPointerCapture) {
+      if (canvas && (canvas as HTMLCanvasElement).setPointerCapture) {
         try {
-          canvas.setPointerCapture(evt.pointerId);
+          (canvas as HTMLCanvasElement).setPointerCapture((evt as PointerEvent).pointerId);
         } catch (err) {
           // Ignore if pointer capture fails
         }
@@ -326,7 +370,7 @@ const AnnotationModal = ({
       setIsDrawing(true);
       const pos = stage.getPointerPosition();
       const { x, y } = normalizePoint(pos);
-      const newLine = { 
+      const newLine: Line = { 
         tool: 'pen', 
         points: [x, y], 
         color, 
@@ -347,15 +391,15 @@ const AnnotationModal = ({
     if (evt.preventDefault) {
       evt.preventDefault();
     }
-    if (evt.stopPropagation) {
-      evt.stopPropagation();
+    if ((evt as TouchEvent).stopPropagation) {
+      (evt as TouchEvent).stopPropagation();
     }
   };
 
-  const handlePointerMove = (e) => {
+  const handlePointerMove = (e: any) => {
     if (!isDrawing) return;
 
-    const evt = e.evt;
+    const evt = e.evt as PointerEvent | TouchEvent;
 
     if (!isAllowedPointerEvent(evt)) {
       if (evt?.preventDefault) {
@@ -372,8 +416,8 @@ const AnnotationModal = ({
       if (evt?.preventDefault) {
         evt.preventDefault();
       }
-      if (evt?.stopPropagation) {
-        evt.stopPropagation();
+      if ((evt as TouchEvent).stopPropagation) {
+        (evt as TouchEvent).stopPropagation();
       }
       // Performance optimization: directly mutate points array in ref
       if (currentLineRef.current) {
@@ -403,8 +447,8 @@ const AnnotationModal = ({
       if (evt?.preventDefault) {
         evt.preventDefault();
       }
-      if (evt?.stopPropagation) {
-        evt.stopPropagation();
+      if ((evt as TouchEvent).stopPropagation) {
+        (evt as TouchEvent).stopPropagation();
       }
       
       const previousLength = teacherAnnotations.length;
@@ -429,8 +473,8 @@ const AnnotationModal = ({
     }
   };
 
-  const handlePointerUp = (e) => {
-    const evt = e?.evt;
+  const handlePointerUp = (e?: any) => {
+    const evt = e?.evt as PointerEvent | TouchEvent | undefined;
     if (!isAllowedPointerEvent(evt)) {
       if (evt?.preventDefault) evt.preventDefault();
       return;
@@ -467,7 +511,7 @@ const AnnotationModal = ({
 
   const handleUndo = () => {
     if (undoStack.current.length > 0) {
-      const previousState = undoStack.current.pop();
+      const previousState = undoStack.current.pop()!;
       redoStack.current.push([...teacherAnnotations]);
       setTeacherAnnotations(previousState);
       onAnnotate(previousState);
@@ -476,7 +520,7 @@ const AnnotationModal = ({
 
   const handleRedo = () => {
     if (redoStack.current.length > 0) {
-      const nextState = redoStack.current.pop();
+      const nextState = redoStack.current.pop()!;
       undoStack.current.push([...teacherAnnotations]);
       setTeacherAnnotations(nextState);
       onAnnotate(nextState);
@@ -486,13 +530,13 @@ const AnnotationModal = ({
   const handleClear = () => {
     undoStack.current.push([...teacherAnnotations]);
     redoStack.current = [];
-    const emptyAnnotations = [];
+    const emptyAnnotations: Line[] = [];
     setTeacherAnnotations(emptyAnnotations);
     onAnnotate(emptyAnnotations);
   };
 
   const handleFlagToggle = () => {
-    if (onToggleFlag) onToggleFlag(student.studentId);
+    if (onToggleFlag && student.studentId) onToggleFlag(student.studentId);
   };
 
   const handleClose = () => {
@@ -511,7 +555,7 @@ const AnnotationModal = ({
   };
 
   // Prevent all touch/pointer events from reaching the overlay/body
-  const handleOverlayTouchMove = (e) => {
+  const handleOverlayTouchMove = (e: React.TouchEvent) => {
     e.preventDefault();
     e.stopPropagation();
   };
@@ -782,3 +826,4 @@ const AnnotationModal = ({
 };
 
 export default AnnotationModal;
+

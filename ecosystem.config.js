@@ -1,7 +1,8 @@
 module.exports = {
   apps: [{
     name: 'whiteboard-api',
-    script: './server.js',
+    script: 'tsx',
+    args: './server.ts',
     instances: 1,
     exec_mode: 'fork',
 

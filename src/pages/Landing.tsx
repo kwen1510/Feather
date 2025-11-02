@@ -1,14 +1,15 @@
+// @ts-nocheck
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import './Landing.css';
 
-function Landing() {
+const Landing: React.FC = () => {
   const navigate = useNavigate();
   const [showStudentLogin, setShowStudentLogin] = useState(false);
   const [studentName, setStudentName] = useState('');
   const [roomCode, setRoomCode] = useState('demo');
 
-  const handleStudentLogin = (e) => {
+  const handleStudentLogin = (e: React.FormEvent) => {
     e.preventDefault();
     if (studentName.trim() && roomCode.trim()) {
       navigate(`/student?room=${roomCode}&name=${encodeURIComponent(studentName.trim())}`);
@@ -126,8 +127,8 @@ function Landing() {
                       cursor: 'pointer',
                       transition: 'transform 0.2s',
                     }}
-                    onMouseOver={(e) => e.target.style.transform = 'translateY(-2px)'}
-                    onMouseOut={(e) => e.target.style.transform = 'translateY(0)'}
+                    onMouseOver={(e) => e.currentTarget.style.transform = 'translateY(-2px)'}
+                    onMouseOut={(e) => e.currentTarget.style.transform = 'translateY(0)'}
                   >
                     Join Room →
                   </button>
@@ -213,6 +214,7 @@ function Landing() {
       </main>
     </div>
   );
-}
+};
 
 export default Landing;
+

@@ -17,7 +17,7 @@ const STUDENT_ID_KEY = 'Feather_studentId';
  * Generate a UUID v4
  * @returns {string} UUID string
  */
-const generateUUID = () => {
+const generateUUID = (): string => {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
     const r = Math.random() * 16 | 0;
     const v = c === 'x' ? r : (r & 0x3 | 0x8);
@@ -35,7 +35,7 @@ const generateUUID = () => {
  *
  * @returns {string} Persistent student identifier for this tab
  */
-export const getOrCreateStudentId = () => {
+export const getOrCreateStudentId = (): string => {
   try {
     // Check for existing ID in this tab's session
     let studentId = sessionStorage.getItem(STUDENT_ID_KEY);
@@ -65,7 +65,7 @@ export const getOrCreateStudentId = () => {
  *
  * @returns {string|null} Student ID or null
  */
-export const getStudentId = () => {
+export const getStudentId = (): string | null => {
   try {
     return sessionStorage.getItem(STUDENT_ID_KEY);
   } catch (error) {
@@ -79,7 +79,7 @@ export const getStudentId = () => {
  *
  * Only affects the current browser tab.
  */
-export const clearStudentId = () => {
+export const clearStudentId = (): boolean => {
   try {
     sessionStorage.removeItem(STUDENT_ID_KEY);
     console.log('🗑️ Cleared studentId for this tab');
@@ -95,7 +95,11 @@ export const clearStudentId = () => {
  *
  * @returns {Object} Identity information
  */
-export const getIdentityInfo = () => {
+export const getIdentityInfo = (): {
+  studentId: string | null;
+  hasPersistedId: boolean;
+  storageAvailable: boolean;
+} => {
   const studentId = getStudentId();
 
   return {
@@ -104,3 +108,4 @@ export const getIdentityInfo = () => {
     storageAvailable: typeof(Storage) !== "undefined"
   };
 };
+

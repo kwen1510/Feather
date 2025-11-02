@@ -1,3 +1,4 @@
+// @ts-nocheck
 import React, { useEffect, useState, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Stage, Layer, Line } from 'react-konva';
@@ -6,19 +7,26 @@ import './StudentNew.css';
 
 const BASE_CANVAS = { width: 800, height: 600 };
 
-function TestStudent() {
+interface Line {
+  tool: string;
+  points: number[];
+  color: string;
+  strokeWidth: number;
+}
+
+const TestStudent: React.FC = () => {
   const [searchParams] = useSearchParams();
   const roomId = searchParams.get('room') || 'load-test';
   const studentName = searchParams.get('name') || `TestStudent-${Date.now()}`;
 
-  const [channel, setChannel] = useState(null);
+  const [channel, setChannel] = useState<Ably.RealtimeChannel | null>(null);
   const [clientId] = useState(`test-student-${Math.random().toString(36).substr(2, 9)}`);
   const [isConnected, setIsConnected] = useState(false);
 
   // Student lines (editable)
-  const [studentLines, setStudentLines] = useState([]);
+  const [studentLines, setStudentLines] = useState<Line[]>([]);
   // Teacher lines (read-only)
-  const [teacherLines, setTeacherLines] = useState([]);
+  const [teacherLines, setTeacherLines] = useState<Line[]>([]);
 
   // Drawing state
   const [tool, setTool] = useState('pen');
@@ -48,8 +56,8 @@ function TestStudent() {
         const whiteboardChannel = ably.channels.get(`room-${roomId}`);
 
         // Wait for channel to attach
-        await new Promise((resolve, reject) => {
-          whiteboardChannel.once('attached', resolve);
+        await new Promise<void>((resolve, reject) => {
+          whiteboardChannel.once('attached', () => resolve());
           whiteboardChannel.once('failed', reject);
           whiteboardChannel.attach();
         });
@@ -69,12 +77,12 @@ function TestStudent() {
         // Subscribe to student layer
         whiteboardChannel.subscribe('student-layer', (message) => {
           isRemoteUpdate.current = true;
-          const data = message.data;
+          const data = message.data as { action?: string; lines?: Line[] };
 
           if (data.action === 'clear') {
             setStudentLines([]);
           } else if (data.lines) {
-            setStudentLines(prev => [...prev, ...data.lines]);
+            setStudentLines(prev => [...prev, ...data.lines!]);
           }
 
           setTimeout(() => {
@@ -84,12 +92,12 @@ function TestStudent() {
 
         // Subscribe to teacher layer
         whiteboardChannel.subscribe('teacher-layer', (message) => {
-          const data = message.data;
+          const data = message.data as { action?: string; lines?: Line[] };
 
           if (data.action === 'clear') {
             setTeacherLines([]);
           } else if (data.lines) {
-            setTeacherLines(prev => [...prev, ...data.lines]);
+            setTeacherLines(prev => [...prev, ...data.lines!]);
           }
         });
 
@@ -103,12 +111,12 @@ function TestStudent() {
   }, [clientId, roomId, studentName]);
 
   // Drawing handlers
-  const handleMouseDown = (e) => {
+  const handleMouseDown = (e: any) => {
     const pos = e.target.getStage().getPointerPosition();
     if (!pos) return;
 
     setIsDrawing(true);
-    const newLine = {
+    const newLine: Line = {
       tool,
       points: [pos.x, pos.y],
       color: 'black',
@@ -117,7 +125,7 @@ function TestStudent() {
     setStudentLines([...studentLines, newLine]);
   };
 
-  const handleMouseMove = (e) => {
+  const handleMouseMove = (e: any) => {
     if (!isDrawing) return;
 
     const stage = e.target.getStage();
@@ -257,6 +265,7 @@ function TestStudent() {
       </div>
     </div>
   );
-}
+};
 
 export default TestStudent;
+

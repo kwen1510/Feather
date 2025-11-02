@@ -1,4 +1,4 @@
-import { createServer } from 'http';
+import { createServer, IncomingMessage, ServerResponse } from 'http';
 import { createRequire } from 'module';
 import dotenv from 'dotenv';
 import { createClient } from '@supabase/supabase-js';
@@ -13,12 +13,47 @@ const PORT = 8080;
 
 // Initialize Supabase client
 const supabase = createClient(
-  process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL,
-  process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY
+  process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || '',
+  process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || ''
 );
 
+interface Participant {
+  id: string;
+  session_id: string;
+  client_id: string;
+  student_id: string;
+  role: string;
+  name: string;
+}
+
+interface Question {
+  id: string;
+  session_id: string;
+  question_number: number;
+  content_type: string;
+  template_type?: string;
+  image_data?: unknown;
+}
+
+interface StudentData {
+  studentLines?: unknown[];
+  teacherAnnotations?: unknown[];
+  studentName?: string;
+}
+
+interface PersistBody {
+  sessionId: string;
+  questionNumber: number;
+  contentType?: string;
+  content?: {
+    type?: string;
+    [key: string]: unknown;
+  };
+  studentsData?: Record<string, StudentData>;
+}
+
 // Helper function to parse request body
-const parseBody = (req) => {
+const parseBody = (req: IncomingMessage): Promise<PersistBody> => {
   return new Promise((resolve, reject) => {
     let body = '';
     req.on('data', chunk => {
@@ -40,7 +75,12 @@ const parseBody = (req) => {
 /**
  * Get or create a participant record in Supabase
  */
-async function getOrCreateParticipant(sessionId, studentId, name, role) {
+async function getOrCreateParticipant(
+  sessionId: string,
+  studentId: string,
+  name: string,
+  role: string
+): Promise<Participant> {
   try {
     // First try to find existing participant
     const { data: existing, error: findError } = await supabase
@@ -66,13 +106,13 @@ async function getOrCreateParticipant(sessionId, studentId, name, role) {
 
         if (updateError) {
           console.error('Error updating participant name:', updateError);
-          return existing;
+          return existing as Participant;
         }
 
-        return updated;
+        return updated as Participant;
       }
 
-      return existing;
+      return existing as Participant;
     }
 
     // Create new participant
@@ -93,7 +133,7 @@ async function getOrCreateParticipant(sessionId, studentId, name, role) {
       throw insertError;
     }
 
-    return newParticipant;
+    return newParticipant as Participant;
   } catch (error) {
     console.error('getOrCreateParticipant error:', error);
     throw error;
@@ -103,9 +143,20 @@ async function getOrCreateParticipant(sessionId, studentId, name, role) {
 /**
  * Save a question to Supabase
  */
-async function saveQuestionToSupabase(sessionId, questionNumber, contentType, content) {
+async function saveQuestionToSupabase(
+  sessionId: string,
+  questionNumber: number,
+  contentType: string | undefined,
+  content: { type?: string; [key: string]: unknown } | undefined
+): Promise<Question> {
   try {
-    const questionData = {
+    const questionData: {
+      session_id: string;
+      question_number: number;
+      content_type: string;
+      template_type?: string;
+      image_data?: unknown;
+    } = {
       session_id: sessionId,
       question_number: questionNumber,
       content_type: contentType || 'blank',
@@ -133,7 +184,7 @@ async function saveQuestionToSupabase(sessionId, questionNumber, contentType, co
     }
 
     console.log(`✅ Saved question ${questionNumber} to Supabase`);
-    return data;
+    return data as Question;
   } catch (error) {
     console.error('saveQuestionToSupabase error:', error);
     throw error;
@@ -143,7 +194,13 @@ async function saveQuestionToSupabase(sessionId, questionNumber, contentType, co
 /**
  * Save annotations (student lines + teacher annotations) to Supabase
  */
-async function saveAnnotationsToSupabase(sessionId, questionId, participantId, studentLines, teacherAnnotations) {
+async function saveAnnotationsToSupabase(
+  sessionId: string,
+  questionId: string,
+  participantId: string,
+  studentLines: unknown[],
+  teacherAnnotations: unknown[]
+): Promise<boolean> {
   try {
     // Check if annotation already exists
     const { data: existing } = await supabase
@@ -186,7 +243,7 @@ async function saveAnnotationsToSupabase(sessionId, questionId, participantId, s
   }
 }
 
-const server = createServer(async (req, res) => {
+const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
   // Enable CORS for Vite dev server
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
@@ -199,7 +256,7 @@ const server = createServer(async (req, res) => {
   }
 
   // Handle /api/token endpoint
-  if (req.url.startsWith('/api/token')) {
+  if (req.url?.startsWith('/api/token')) {
     try {
       const url = new URL(req.url, `http://localhost:${PORT}`);
       const clientId = url.searchParams.get('clientId') || `client-${Date.now()}`;
@@ -210,6 +267,7 @@ const server = createServer(async (req, res) => {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(tokenRequest));
     } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
       console.error('Token error:', err);
       res.writeHead(500, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: 'Failed to create Ably token' }));
@@ -243,7 +301,7 @@ const server = createServer(async (req, res) => {
           const { studentLines = [], teacherAnnotations = [], studentName = 'Unknown Student' } = data;
 
           // Only save if there's actual content
-          if (studentLines.length > 0 || teacherAnnotations.length > 0) {
+          if ((studentLines && studentLines.length > 0) || (teacherAnnotations && teacherAnnotations.length > 0)) {
             // Get or create participant
             const participant = await getOrCreateParticipant(
               sessionId,
@@ -257,8 +315,8 @@ const server = createServer(async (req, res) => {
               sessionId,
               question.id,
               participant.id,
-              studentLines,
-              teacherAnnotations
+              studentLines as unknown[],
+              teacherAnnotations as unknown[]
             );
 
             savedCount++;
@@ -275,9 +333,10 @@ const server = createServer(async (req, res) => {
         savedCount
       }));
     } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
       console.error('Persist strokes error:', err);
       res.writeHead(500, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: 'Failed to persist strokes', details: err.message }));
+      res.end(JSON.stringify({ error: 'Failed to persist strokes', details: errorMessage }));
     }
     return;
   }
@@ -291,3 +350,4 @@ server.listen(PORT, () => {
   console.log('📝 Providing authentication tokens for Ably\n');
   console.log('✨ Press Ctrl+C to stop the server\n');
 });
+

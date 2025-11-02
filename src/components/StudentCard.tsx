@@ -3,6 +3,46 @@ import { Stage, Layer, Line, Image as KonvaImage } from 'react-konva';
 import FlagIcon from './FlagIcon';
 import './StudentCard.css';
 
+interface Line {
+  points: number[];
+  color?: string;
+  strokeWidth?: number;
+}
+
+interface SharedImage {
+  dataUrl: string;
+  width: number;
+  height: number;
+}
+
+interface StudentMeta {
+  base?: {
+    width?: number;
+    height?: number;
+  };
+}
+
+interface Student {
+  clientId: string;
+  name?: string;
+  lines?: Line[];
+  lastUpdate?: number;
+  isActive?: boolean;
+  isFlagged?: boolean;
+  isVisible?: boolean;
+  studentId?: string;
+  meta?: StudentMeta;
+}
+
+interface StudentCardProps {
+  student: Student;
+  onClick: (student: Student) => void;
+  onToggleFlag?: (studentId: string) => void;
+  teacherAnnotations?: Line[];
+  sharedImage?: SharedImage;
+  hideNames?: boolean;
+}
+
 /**
  * StudentCard - Shows a preview of a student's drawing
  *
@@ -13,10 +53,17 @@ import './StudentCard.css';
  * - sharedImage: Shared image from teacher
  * - hideNames: Whether to hide student names
  */
-const StudentCard = ({ student, onClick, onToggleFlag, teacherAnnotations = [], sharedImage, hideNames = false }) => {
-  const stageRef = useRef(null);
-  const canvasContainerRef = useRef(null);
-  const [image, setImage] = useState(null);
+const StudentCard: React.FC<StudentCardProps> = ({ 
+  student, 
+  onClick, 
+  onToggleFlag, 
+  teacherAnnotations = [], 
+  sharedImage, 
+  hideNames = false 
+}) => {
+  const stageRef = useRef<any>(null);
+  const canvasContainerRef = useRef<HTMLDivElement>(null);
+  const [image, setImage] = useState<HTMLImageElement | null>(null);
   const [canvasWidth, setCanvasWidth] = useState(300);
 
   useEffect(() => {
@@ -51,7 +98,7 @@ const StudentCard = ({ student, onClick, onToggleFlag, teacherAnnotations = [], 
   }, []);
 
   // Format student name from clientId
-  const getStudentName = () => {
+  const getStudentName = (): string => {
     if (student?.name) return student.name;
     if (!student?.clientId) return 'Unknown Student';
     // Extract name from clientId (e.g., "student-123" or "load-test-student-1")
@@ -60,7 +107,7 @@ const StudentCard = ({ student, onClick, onToggleFlag, teacherAnnotations = [], 
   };
 
   // Get time since last update
-  const getLastUpdateText = () => {
+  const getLastUpdateText = (): string => {
     if (!student.lastUpdate) return 'Just joined';
     const seconds = Math.floor((Date.now() - student.lastUpdate) / 1000);
     if (seconds < 5) return 'Just now';
@@ -76,21 +123,21 @@ const StudentCard = ({ student, onClick, onToggleFlag, teacherAnnotations = [], 
   // Container has 4:3 aspect ratio (same as base 800x600)
   const scale = canvasWidth / baseWidth;
 
-  const handleFlagToggle = (event) => {
+  const handleFlagToggle = (event: React.MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation();
-    if (onToggleFlag) {
+    if (onToggleFlag && student.studentId) {
       onToggleFlag(student.studentId);
     }
   };
 
   // Calculate image display position
-  const getImageLayout = () => {
+  const getImageLayout = (): { x: number; y: number; width: number; height: number } | null => {
     if (!sharedImage || !image) return null;
 
     const imageAspect = sharedImage.width / sharedImage.height;
     const canvasAspect = baseWidth / baseHeight;
 
-    let displayWidth, displayHeight, x, y;
+    let displayWidth: number, displayHeight: number, x: number, y: number;
 
     if (imageAspect > canvasAspect) {
       displayWidth = baseWidth;
@@ -227,3 +274,4 @@ const StudentCard = ({ student, onClick, onToggleFlag, teacherAnnotations = [], 
 };
 
 export default StudentCard;
+
