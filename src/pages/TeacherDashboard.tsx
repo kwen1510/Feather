@@ -1021,7 +1021,7 @@ const TeacherDashboard: React.FC = () => {
       if (whiteboardChannel) {
         // Unsubscribe from all events
         whiteboardChannel.unsubscribe();
-        studentCh.presence.unsubscribe();
+        whiteboardChannel.presence.unsubscribe();
       }
 
       if (ablyClient) {
