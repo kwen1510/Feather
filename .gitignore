@@ -8,8 +8,13 @@
 *.pem
 *.crt
 
-# Local testing
-test/
+# System files
+.DS_Store
+*.swp
+*.swo
+*~
+
+# Dependencies
 node_modules
 
 # Build artifacts
@@ -38,12 +43,6 @@ load-testing/
 
 # Local database files
 database/
-
-# Deployment scripts (optional - uncomment if you don't want these in git)
-# deploy.sh
-# quick-deploy.sh
-# setup.sh
-# setup-ssl.sh
 
 # SQL migration files (handled separately)
 *.sql
