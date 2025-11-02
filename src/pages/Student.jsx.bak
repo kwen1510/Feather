@@ -93,8 +93,8 @@ function Student() {
   const roomId = searchParams.get('room');
   const studentName = searchParams.get('name');
 
-  const [broadcastChannel, setBroadcastChannel] = useState(null); // Broadcast channel: {roomId}-broadcast (teacher publishes, all students subscribe)
-  const [individualChannel, setIndividualChannel] = useState(null); // Individual channel: {roomId}-{studentId} (bidirectional)
+  const [studentChannel, setStudentChannel] = useState(null); // For publishing student messages
+  const [teacherChannel, setTeacherChannel] = useState(null); // For receiving teacher messages
 
   const clientIdentityRef = useRef({ roomId: null, studentName: null, clientId: null });
   const [clientId, setClientId] = useState(null);
@@ -441,45 +441,42 @@ function Student() {
           if (hasInitiallyConnected && whiteboardChannel) {
             console.log('🔄 Reconnected - re-entering presence and syncing state');
             try {
-            // Re-enter presence on broadcast channel
-            await whiteboardChannel.presence.enter({
-              name: studentName || 'Anonymous',
-              studentId: studentId || ''
-            });
-            console.log('✅ Re-entered presence as:', studentName || 'Anonymous', 'with studentId:', studentId || '');
-
-            // Get individual channel reference (should exist from initial connection)
-            const individualChannelRef = ablyClient.channels.get(`${roomId}-${studentId}`);
-
-            // Request current question state + annotations (sent on individual channel)
-            setTimeout(() => {
-              if (!isActive) return;
-              console.log('🔄 Requesting full state (question + annotations)');
-              individualChannelRef.publish('request-current-state', {
-                clientId: clientId || '',
-                studentId: studentId || '',
-                timestamp: Date.now(),
+              // Re-enter presence on student channel (whiteboardChannel = studentCh from first connection)
+              await whiteboardChannel.presence.enter({
+                name: studentName || 'Anonymous',
+                studentId: studentId || ''
               });
-            }, 300);
+              console.log('✅ Re-entered presence as:', studentName || 'Anonymous', 'with studentId:', studentId || '');
 
-            // Re-publish current strokes to teacher after reconnection (sent on individual channel)
-            setTimeout(() => {
-              if (!isActive) return;
-              const currentStrokes = studentLinesRef.current;
-              if (currentStrokes && currentStrokes.length > 0) {
-                console.log('🔄 Re-emitting', currentStrokes.length, 'strokes to teacher after reconnection...');
-                individualChannelRef.publish('student-layer', {
-                  lines: currentStrokes,
-                  studentId: studentId || '',
+              // Request current question state + annotations (combined in sync-full-state)
+              setTimeout(() => {
+                if (!isActive) return;
+                console.log('🔄 Requesting full state (question + annotations)');
+                whiteboardChannel.publish('request-current-state', {
                   clientId: clientId || '',
-                  meta: {
-                    display: canvasSizeRef.current,
-                    scale: canvasScaleRef.current,
-                  },
+                  studentId: studentId || '',
+                  timestamp: Date.now(),
                 });
-                console.log('📤 Re-published strokes to teacher after reconnection');
-              }
-            }, 400);
+              }, 300);
+
+              // Re-publish current strokes to teacher after reconnection
+              setTimeout(() => {
+                if (!isActive) return;
+                const currentStrokes = studentLinesRef.current;
+                if (currentStrokes && currentStrokes.length > 0) {
+                  console.log('🔄 Re-emitting', currentStrokes.length, 'strokes to teacher after reconnection...');
+                  whiteboardChannel.publish('student-layer', {
+                    lines: currentStrokes,
+                    studentId: studentId || '',
+                    clientId: clientId || '',
+                    meta: {
+                      display: canvasSizeRef.current,
+                      scale: canvasScaleRef.current,
+                    },
+                  });
+                  console.log('📤 Re-published strokes to teacher after reconnection');
+                }
+              }, 400);
             } catch (error) {
               console.error('❌ Error during reconnection:', error);
             }
@@ -493,53 +490,31 @@ function Student() {
           setIsConnected(false);
         });
 
-        // Create broadcast + individual channels
-        const broadcastCh = ablyClient.channels.get(`${roomId}-broadcast`);
-        const individualCh = ablyClient.channels.get(`${roomId}-${studentId}`);
+        // Create separate channels for student publishing and teacher receiving
+        const studentCh = ablyClient.channels.get(`${roomId}-student`);
+        const teacherCh = ablyClient.channels.get(`${roomId}-teacher`);
 
-        whiteboardChannel = broadcastCh; // Keep reference for cleanup (presence is on broadcast channel)
+        whiteboardChannel = studentCh; // Keep reference for cleanup (presence is on student channel)
 
-        // Helper to subscribe to broadcast channel
-        const subscribeBroadcast = (event, handler) => {
-          broadcastCh.subscribe(event, handler);
-          channelSubscriptions.push({ channel: broadcastCh, event, handler });
+        const subscribe = (event, handler) => {
+          teacherCh.subscribe(event, handler); // Subscribe to teacher channel only
+          channelSubscriptions.push({ event, handler });
         };
 
-        // Helper to subscribe to individual channel
-        const subscribeIndividual = (event, handler) => {
-          individualCh.subscribe(event, handler);
-          channelSubscriptions.push({ channel: individualCh, event, handler });
-        };
+        // Students DO NOT subscribe to student-layer to avoid being charged for peer messages
+        // Subscribing (even with empty handler) still causes Ably to deliver all messages
+        // With 50 students, this would be 50×50 = 2,500 msg/sec overhead!
+        // Students only need to PUBLISH to student-layer (no subscribe needed)
 
-        // Listen for teacher annotations (individual channel - no filtering needed, only this student receives)
-        subscribeIndividual('teacher-annotation', (message) => {
+        // Listen for teacher annotations and filter by targetStudentId
+        subscribe('teacher-annotation', (message) => {
           if (!isActive) return;
-          const annotations = message.data.annotations || [];
-          console.log('📨 Received teacher annotation:', annotations.length, 'strokes');
+          console.log('📨 Received teacher-annotation event. Target:', message.data.targetStudentId, 'My clientId:', clientId, 'Match:', message.data.targetStudentId === clientId);
 
-          isRemoteUpdate.current = true;
-          setTeacherLines(annotations);
+          if (message.data.targetStudentId === clientId) {
+            const annotations = message.data.annotations || [];
+            console.log('✅ ClientId matches! Applying', annotations.length, 'teacher annotation strokes');
 
-          setTimeout(() => {
-            isRemoteUpdate.current = false;
-          }, 100);
-        });
-
-        // Listen for full state sync (individual channel - targeted to this student only)
-        subscribeIndividual('sync-full-state', (message) => {
-          if (!isActive) return;
-          const { content = null, annotations = [] } = message.data;
-
-          console.log('📨 Received sync-full-state:', {
-            hasContent: !!content,
-            annotationCount: annotations.length
-          });
-
-          setSharedImage(content || null);
-
-          // Apply teacher annotations immediately
-          if (annotations.length > 0) {
-            console.log('✅ Applying', annotations.length, 'teacher annotations from sync');
             isRemoteUpdate.current = true;
             setTeacherLines(annotations);
 
@@ -549,8 +524,34 @@ function Student() {
           }
         });
 
-        // Listen for clear all drawings command (broadcast channel - all students receive)
-        subscribeBroadcast('clear-all-drawings', (message) => {
+        // Listen for full state sync (content + annotations)
+        subscribe('sync-full-state', (message) => {
+          if (!isActive) return;
+          if (message.data.targetClientId === clientId) {
+            const { content = null, annotations = [] } = message.data;
+
+            console.log('📨 Received sync-full-state:', {
+              hasContent: !!content,
+              annotationCount: annotations.length
+            });
+
+            setSharedImage(content || null);
+
+            // Apply teacher annotations immediately
+            if (annotations.length > 0) {
+              console.log('✅ Applying', annotations.length, 'teacher annotations from sync');
+              isRemoteUpdate.current = true;
+              setTeacherLines(annotations);
+
+              setTimeout(() => {
+                isRemoteUpdate.current = false;
+              }, 100);
+            }
+          }
+        });
+
+        // Listen for clear all drawings command (when teacher sends new content)
+        subscribe('clear-all-drawings', (message) => {
           if (!isActive) return;
 
           console.log('📨 Received clear-all-drawings with content:', message.data);
@@ -579,13 +580,13 @@ function Student() {
         });
 
         // Listen for session started
-        subscribeBroadcast('session-started', () => {
+        subscribe('session-started', () => {
           if (!isActive) return;
           setSessionStatus('active');
         });
 
         // Listen for session ended
-        subscribeBroadcast('session-ended', () => {
+        subscribe('session-ended', () => {
           if (!isActive) return;
           console.log('🔚 Session ended');
 
@@ -594,7 +595,7 @@ function Student() {
         });
 
         // Listen for teacher annotation recovery response (when student requests after refresh)
-        subscribeIndividual('response-teacher-annotations', (message) => {
+        subscribe('response-teacher-annotations', (message) => {
           if (!isActive) return;
           if (message.data.targetStudentId === studentId || message.data.targetClientId === clientId) {
             const annotations = message.data.annotations || [];
@@ -610,8 +611,8 @@ function Student() {
           }
         });
 
-        // Listen for teacher request for student strokes (after teacher reconnects) - broadcast channel
-        subscribeBroadcast('request-student-strokes', async (message) => {
+        // Listen for teacher request for student strokes (after teacher reconnects)
+        subscribe('request-student-strokes', async (message) => {
           if (!isActive) return;
           console.log('📨 Teacher requested student strokes - loading from IndexedDB');
 
@@ -620,10 +621,10 @@ function Student() {
             const ownStrokes = await loadStrokesFromIndexedDB(roomId, studentId, 'student');
             console.log(`📤 Sending ${ownStrokes.length} strokes to teacher`);
 
-            // Send strokes back to teacher on individual channel
+            // Send strokes back to teacher on student channel
             setTimeout(() => {
-              if (individualCh && individualCh.state === 'attached') {
-                individualCh.publish('response-student-strokes', {
+              if (studentCh && studentCh.state === 'attached') {
+                studentCh.publish('response-student-strokes', {
                   studentId: studentId,
                   studentName: studentName,
                   strokes: ownStrokes,
@@ -637,25 +638,25 @@ function Student() {
           }
         });
 
-        // Enter presence on broadcast channel (teacher monitors presence here)
-        await broadcastCh.presence.enter({
+        // Enter presence on student channel (simplified: only name and studentId, no visibility tracking)
+        await studentCh.presence.enter({
           name: studentName || 'Anonymous',
           studentId: studentId || ''
         });
 
         if (!isActive) {
-          await broadcastCh.presence.leaveClient(clientId);
+          await studentCh.presence.leaveClient(clientId);
           ablyClient.close();
           return;
         }
 
-        setBroadcastChannel(broadcastCh);
-        setIndividualChannel(individualCh);
+        setStudentChannel(studentCh);
+        setTeacherChannel(teacherCh);
 
-        // Request current state (content + annotations) - publish to individual channel
+        // Request current state (content + annotations) - publish to student channel
         setTimeout(() => {
           if (!isActive) return;
-          individualCh.publish('request-current-state', {
+          studentCh.publish('request-current-state', {
             clientId: clientId || '',
             studentId: studentId || '',
             timestamp: Date.now(),
@@ -712,11 +713,11 @@ function Student() {
                     isRemoteUpdate.current = false;
                   }, 100);
                   
-                  // 4) Explicitly publish loaded strokes to teacher (rejoin after refresh) - on individual channel
+                  // 4) Explicitly publish loaded strokes to teacher (rejoin after refresh)
                   setTimeout(() => {
-                    if (individualCh && isActive) {
+                    if (studentCh && isActive) {
                       console.log('4️⃣ Re-emitting strokes to teacher after refresh...');
-                      individualCh.publish('student-layer', {
+                      studentCh.publish('student-layer', {
                         lines: ownStrokes,
                         studentId,
                         clientId,
@@ -737,10 +738,10 @@ function Student() {
                 }
               }
 
-              // Request teacher annotations via Ably (teacher will load from IndexedDB and respond) - on individual channel
+              // Request teacher annotations via Ably (teacher will load from IndexedDB and respond)
               console.log('📤 Requesting teacher annotations via Ably...');
-              if (individualCh && isActive) {
-                individualCh.publish('request-teacher-annotations', {
+              if (studentCh && isActive) {
+                studentCh.publish('request-teacher-annotations', {
                   studentId: studentId,
                   clientId: clientId,
                   timestamp: Date.now(),
@@ -766,26 +767,23 @@ function Student() {
       isActive = false;
 
       // Always cleanup on unmount (which only happens on actual page unload)
-      // Unsubscribe from all channel events
-      channelSubscriptions.forEach(({ channel, event, handler }) => {
-        try {
-          channel.unsubscribe(event, handler);
-        } catch (error) {
-          console.error('Error unsubscribing:', error);
-        }
-      });
+      // Cleanup both channels
+      if (teacherCh) {
+        channelSubscriptions.forEach(({ event, handler }) => {
+          teacherCh.unsubscribe(event, handler);
+        });
+      }
 
-      // Leave presence on broadcast channel
-      if (whiteboardChannel) {
+      if (studentCh) {
         try {
-          whiteboardChannel.presence.leaveClient(clientId);
+          studentCh.presence.leaveClient(clientId);
         } catch (error) {
           console.error('Error leaving presence:', error);
         }
       }
 
-      setBroadcastChannel(null);
-      setIndividualChannel(null);
+      setStudentChannel(null);
+      setTeacherChannel(null);
 
       if (ablyClient) {
         try {
@@ -797,17 +795,18 @@ function Student() {
     };
   }, [clientId, roomId, studentName, navigate, studentId]); // Removed sessionId and currentQuestionId to prevent reconnects
 
-  // Track tab visibility and notify teacher (publish to individual channel)
+  // Track tab visibility and notify teacher (OPTIMIZED: only publish, no presence.update)
   useEffect(() => {
-    if (!individualChannel || visibilityListenerAttached.current) return;
+    if (!studentChannel || visibilityListenerAttached.current) return;
 
     visibilityListenerAttached.current = true;
 
     const handleVisibilityChange = () => {
       const isVisible = !document.hidden;
 
-      // Publish visibility change to individual channel (only teacher receives)
-      individualChannel.publish('student-visibility', {
+      // Publish visibility change to student channel (teacher subscribes)
+      // Removed duplicate presence.update() call to save 50% of visibility messages
+      studentChannel.publish('student-visibility', {
         studentId: studentId || '',
         studentName: studentName || 'Anonymous',
         isVisible: isVisible,
@@ -823,7 +822,7 @@ function Student() {
       visibilityListenerAttached.current = false;
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [individualChannel, studentId, studentName]);
+  }, [studentChannel, studentId, studentName]);
 
   // Responsive canvas sizing (preserve 4:3 aspect)
   useEffect(() => {
@@ -1035,9 +1034,9 @@ function Student() {
           await saveStrokeToIndexedDB(strokeToSave, roomId, studentId, 'student', sessionId);
           console.log('✅ Stroke saved to IndexedDB:', strokeToSave.strokeId);
 
-          // 2) Publish completed stroke to Ably on individual channel (single message per stroke)
-          if (individualChannel) {
-            individualChannel.publish('student-layer', {
+          // 2) Publish completed stroke to Ably on student channel (single message per stroke)
+          if (studentChannel) {
+            studentChannel.publish('student-layer', {
               lines: studentLinesRef.current,
               studentId,
               clientId,
@@ -1062,9 +1061,9 @@ function Student() {
           await replaceAllStrokesInIndexedDB(studentLinesRef.current, roomId, studentId, 'student', sessionId);
           console.log('✅ Eraser: Synced to IndexedDB');
 
-          // Publish updated state after erase to individual channel
-          if (individualChannel) {
-            individualChannel.publish('student-layer', {
+          // Publish updated state after erase to student channel
+          if (studentChannel) {
+            studentChannel.publish('student-layer', {
               lines: studentLinesRef.current,
               studentId,
               clientId,
@@ -1095,9 +1094,9 @@ function Student() {
         await replaceAllStrokesInIndexedDB(previousState, roomId, studentId, 'student', sessionId);
         console.log('✅ Undo: Synced to IndexedDB');
 
-        // Publish updated state to individual channel
-        if (individualChannel) {
-          individualChannel.publish('student-layer', {
+        // Publish updated state to student channel
+        if (studentChannel) {
+          studentChannel.publish('student-layer', {
             lines: previousState,
             studentId,
             clientId,
@@ -1125,9 +1124,9 @@ function Student() {
         await replaceAllStrokesInIndexedDB(nextState, roomId, studentId, 'student', sessionId);
         console.log('✅ Redo: Synced to IndexedDB');
 
-        // Publish updated state to individual channel
-        if (individualChannel) {
-          individualChannel.publish('student-layer', {
+        // Publish updated state to student channel
+        if (studentChannel) {
+          studentChannel.publish('student-layer', {
             lines: nextState,
             studentId,
             clientId,
@@ -1154,9 +1153,9 @@ function Student() {
       await clearStrokesFromIndexedDB(roomId, studentId, 'student');
       console.log('✅ Clear: Synced to IndexedDB');
 
-      // Publish cleared state to individual channel
-      if (individualChannel) {
-        individualChannel.publish('student-layer', {
+      // Publish cleared state to student channel
+      if (studentChannel) {
+        studentChannel.publish('student-layer', {
           lines: [],
           studentId,
           clientId,

@@ -54,8 +54,9 @@ const TestTeacher = () => {
 
   // Ably connection
   const [ably, setAbly] = useState(null);
-  const [studentChannel, setStudentChannel] = useState(null);
-  const [teacherChannel, setTeacherChannel] = useState(null);
+  const [broadcastChannel, setBroadcastChannel] = useState(null); // Broadcast channel: {roomId}-broadcast (teacher publishes, all subscribe)
+  const [studentChannels, setStudentChannels] = useState({}); // Individual channels: {roomId}-{studentId} (one per student, bidirectional)
+  const studentChannelsRef = useRef({}); // Ref to access latest student channels in callbacks
   const [isConnected, setIsConnected] = useState(false);
   const [clientId] = useState(`teacher-${Math.random().toString(36).substring(7)}`);
 
@@ -162,6 +163,10 @@ const TestTeacher = () => {
     studentsRef.current = students;
   }, [students]);
 
+  useEffect(() => {
+    studentChannelsRef.current = studentChannels;
+  }, [studentChannels]);
+
   // Toast notification helper
   const toastIdCounter = useRef(0);
   const showToast = (message, type = 'info') => {
@@ -229,9 +234,9 @@ const TestTeacher = () => {
         })
         .eq('id', sessionId);
 
-      // Publish session-ended event
-      if (channel) {
-        await teacherChannel.publish('session-ended', {
+      // Publish session-ended event to broadcast channel
+      if (broadcastChannel) {
+        await broadcastChannel.publish('session-ended', {
           timestamp: Date.now(),
           reason,
         });
@@ -249,7 +254,7 @@ const TestTeacher = () => {
       console.error('Error ending session:', error);
       return false;
     }
-  }, [sessionId, sessionStatus, channel, currentQuestionNumber, roomId, sharedImage]);
+  }, [sessionId, sessionStatus, broadcastChannel, currentQuestionNumber, roomId, sharedImage]);
 
   // Redis auto-save removed - now using IndexedDB + Ably recovery only
 
@@ -500,7 +505,7 @@ const TestTeacher = () => {
 
             try {
               // Re-enter presence
-              await studentCh.presence.enter({
+              await whiteboardChannel.presence.enter({
                 role: 'teacher',
                 timestamp: Date.now()
               });
@@ -509,7 +514,7 @@ const TestTeacher = () => {
               setTimeout(async () => {
                 if (whiteboardChannel && whiteboardChannel.state === 'attached') {
                   // Check number of connected students before requesting strokes
-                  const connectedMembers = await studentCh.presence.get();
+                  const connectedMembers = await whiteboardChannel.presence.get();
                   const connectedStudents = connectedMembers.filter(member =>
                     member.clientId &&
                     member.clientId !== clientId &&
@@ -1481,8 +1486,8 @@ const TestTeacher = () => {
         setSessionStatus('active');
         setIsNewSession(false); // Session is no longer new once it's started
 
-        // Publish session-started event
-        await teacherChannel.publish('session-started', {
+        // Publish session-started event (broadcast to all)
+        await broadcastChannel.publish('session-started', {
           timestamp: Date.now(),
           sessionId: sessionId,
         });
@@ -1497,8 +1502,8 @@ const TestTeacher = () => {
       }
       // For blank, content stays null
 
-      // Clear all student drawings and teacher annotations + send content in ONE message
-      await teacherChannel.publish('clear-all-drawings', {
+      // Clear all student drawings and teacher annotations + send content in ONE message (broadcast to all)
+      await broadcastChannel.publish('clear-all-drawings', {
         timestamp: Date.now(),
         content: content, // Include content directly
       });
