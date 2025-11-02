@@ -585,9 +585,136 @@ const TeacherDashboard = () => {
 
         setAbly(ablyClient);
 
-        // Note: Channels already created above (studentCh, teacherCh) before connection handlers
+        // Note: Channels already created above (broadcastCh) before connection handlers
 
-        // Removed: Subscribe to stroke count updates (will be replaced with real-time stroke subscription)
+        // Helper function to subscribe to student channel (avoid duplicate subscriptions)
+        const subscribeToStudentChannel = (studentCh, studentIdParam) => {
+          studentCh.subscribe('student-layer', (message) => {
+            const { lines, studentId, clientId: studentClientId } = message.data;
+            
+            setStudents(prev => {
+              const lookupId = studentId || Object.keys(prev).find(id => prev[id].clientId === studentClientId);
+
+              if (!lookupId) {
+                console.warn('⚠️ Student not found for stroke update. studentId:', studentId, 'clientId:', studentClientId);
+                return prev;
+              }
+
+              console.log('✅ Updating student', lookupId, 'with', (lines || []).length, 'lines');
+
+              return {
+                ...prev,
+                [lookupId]: {
+                  ...prev[lookupId],
+                  lines: lines || [],
+                }
+              };
+            });
+          });
+
+          studentCh.subscribe('student-visibility', (message) => {
+            const { studentId, studentName, isVisible } = message.data;
+
+            if (!studentId) return;
+
+            setStudents(prev => {
+              const student = prev[studentId];
+              if (!student) return prev;
+
+              const wasInactive = student.isVisible === false;
+
+              if (!isVisible) {
+                showToast(`⚠️ ${studentName} switched away`, 'warning');
+              } else if (wasInactive) {
+                showToast(`✓ ${studentName} returned`, 'success');
+              }
+
+              return {
+                ...prev,
+                [studentId]: {
+                  ...student,
+                  isVisible: isVisible,
+                  lastVisibilityChange: Date.now(),
+                }
+              };
+            });
+          });
+
+          studentCh.subscribe('request-current-state', (message) => {
+            const requestingStudentId = message.data?.studentId;
+
+            setTimeout(() => {
+              try {
+                if (!studentCh || studentCh.state !== 'attached') {
+                  console.warn('⚠️ Cannot send sync-full-state: channel not ready');
+                  return;
+                }
+
+                const annotations = teacherAnnotationsRef.current?.[requestingStudentId] || [];
+
+                studentCh.publish('sync-full-state', {
+                  content: sharedImageRef.current || null,
+                  annotations: annotations,
+                  timestamp: Date.now(),
+                });
+              } catch (error) {
+                console.error('❌ Error sending sync-full-state on request:', error);
+              }
+            }, 100);
+          });
+
+          studentCh.subscribe('request-teacher-annotations', async (message) => {
+            const requestingStudentId = message.data?.studentId;
+            const requestingClientId = message.data?.clientId;
+
+            console.log(`📨 Received annotation request from student ${requestingStudentId}`);
+
+            try {
+              const { loadAllTeacherAnnotations } = await import('../utils/indexedDB');
+              const allAnnotations = await loadAllTeacherAnnotations(roomId, 'teacher');
+              const annotations = allAnnotations[requestingStudentId] || [];
+
+              console.log(`📤 Sending ${annotations.length} teacher annotations to student ${requestingStudentId}`);
+
+              setTimeout(() => {
+                if (studentCh && studentCh.state === 'attached') {
+                  studentCh.publish('response-teacher-annotations', {
+                    targetStudentId: requestingStudentId,
+                    targetClientId: requestingClientId,
+                    annotations: annotations,
+                    timestamp: Date.now(),
+                  });
+                }
+              }, 100);
+            } catch (error) {
+              console.error('❌ Error loading annotations from IndexedDB:', error);
+            }
+          });
+
+          studentCh.subscribe('response-student-strokes', (message) => {
+            const studentId = message.data?.studentId;
+            const studentLines = message.data?.strokes || [];
+            const studentName = message.data?.studentName;
+
+            console.log(`📨 Received ${studentLines.length} strokes from student ${studentName} (${studentId})`);
+
+            if (studentId && studentLines.length > 0) {
+              setStudents(prevStudents => {
+                const existing = prevStudents[studentId];
+                if (existing) {
+                  return {
+                    ...prevStudents,
+                    [studentId]: {
+                      ...existing,
+                      lines: studentLines,
+                    }
+                  };
+                }
+                return prevStudents;
+              });
+            }
+          });
+        };
 
         // Listen for presence events (student connect/disconnect) on broadcast channel
         broadcastCh.presence.subscribe('enter', (member) => {
@@ -623,132 +750,8 @@ const TeacherDashboard = () => {
               console.log(`📡 Creating individual channel for student ${incomingStudentId}`);
               const studentCh = ablyClient.channels.get(`${roomId}-${incomingStudentId}`);
               
-              // Subscribe to student messages on this individual channel
-              studentCh.subscribe('student-layer', (message) => {
-                const { lines, studentId, clientId: studentClientId } = message.data;
-                
-                setStudents(prev => {
-                  const lookupId = studentId || Object.keys(prev).find(id => prev[id].clientId === studentClientId);
-
-                  if (!lookupId) {
-                    console.warn('⚠️ Student not found for stroke update. studentId:', studentId, 'clientId:', studentClientId);
-                    return prev;
-                  }
-
-                  console.log('✅ Updating student', lookupId, 'with', (lines || []).length, 'lines');
-
-                  return {
-                    ...prev,
-                    [lookupId]: {
-                      ...prev[lookupId],
-                      lines: lines || [],
-                    }
-                  };
-                });
-              });
-
-              studentCh.subscribe('student-visibility', (message) => {
-                const { studentId, studentName, isVisible } = message.data;
-
-                if (!studentId) return;
-
-                setStudents(prev => {
-                  const student = prev[studentId];
-                  if (!student) return prev;
-
-                  const wasInactive = student.isVisible === false;
-
-                  if (!isVisible) {
-                    showToast(`⚠️ ${studentName} switched away`, 'warning');
-                  } else if (wasInactive) {
-                    showToast(`✓ ${studentName} returned`, 'success');
-                  }
-
-                  return {
-                    ...prev,
-                    [studentId]: {
-                      ...student,
-                      isVisible: isVisible,
-                      lastVisibilityChange: Date.now(),
-                    }
-                  };
-                });
-              });
-
-              studentCh.subscribe('request-current-state', (message) => {
-                const requestingStudentId = message.data?.studentId;
-
-                setTimeout(() => {
-                  try {
-                    if (!studentCh || studentCh.state !== 'attached') {
-                      console.warn('⚠️ Cannot send sync-full-state: channel not ready');
-                      return;
-                    }
-
-                    const annotations = teacherAnnotationsRef.current?.[requestingStudentId] || [];
-
-                    studentCh.publish('sync-full-state', {
-                      content: sharedImageRef.current || null,
-                      annotations: annotations,
-                      timestamp: Date.now(),
-                    });
-                  } catch (error) {
-                    console.error('❌ Error sending sync-full-state on request:', error);
-                  }
-                }, 100);
-              });
-
-              studentCh.subscribe('request-teacher-annotations', async (message) => {
-                const requestingStudentId = message.data?.studentId;
-                const requestingClientId = message.data?.clientId;
-
-                console.log(`📨 Received annotation request from student ${requestingStudentId}`);
-
-                try {
-                  const { loadAllTeacherAnnotations } = await import('../utils/indexedDB');
-                  const allAnnotations = await loadAllTeacherAnnotations(roomId, 'teacher');
-                  const annotations = allAnnotations[requestingStudentId] || [];
-
-                  console.log(`📤 Sending ${annotations.length} teacher annotations to student ${requestingStudentId}`);
-
-                  setTimeout(() => {
-                    if (studentCh && studentCh.state === 'attached') {
-                      studentCh.publish('response-teacher-annotations', {
-                        targetStudentId: requestingStudentId,
-                        targetClientId: requestingClientId,
-                        annotations: annotations,
-                        timestamp: Date.now(),
-                      });
-                    }
-                  }, 100);
-                } catch (error) {
-                  console.error('❌ Error loading annotations from IndexedDB:', error);
-                }
-              });
-
-              studentCh.subscribe('response-student-strokes', (message) => {
-                const studentId = message.data?.studentId;
-                const studentLines = message.data?.strokes || [];
-                const studentName = message.data?.studentName;
-
-                console.log(`📨 Received ${studentLines.length} strokes from student ${studentName} (${studentId})`);
-
-                if (studentId && studentLines.length > 0) {
-                  setStudents(prevStudents => {
-                    const existing = prevStudents[studentId];
-                    if (existing) {
-                      return {
-                        ...prevStudents,
-                        [studentId]: {
-                          ...existing,
-                          lines: studentLines,
-                        }
-                      };
-                    }
-                    return prevStudents;
-                  });
-                }
-              });
+              // Subscribe to all student messages using helper function
+              subscribeToStudentChannel(studentCh, incomingStudentId);
 
               return {
                 ...prevChannels,
@@ -943,132 +946,8 @@ const TeacherDashboard = () => {
           console.log(`📡 Creating individual channel for existing student ${memberStudentId}`);
           const studentCh = ablyClient.channels.get(`${roomId}-${memberStudentId}`);
           
-          // Subscribe to student messages on this individual channel
-          studentCh.subscribe('student-layer', (message) => {
-            const { lines, studentId, clientId: studentClientId } = message.data;
-            
-            setStudents(prev => {
-              const lookupId = studentId || Object.keys(prev).find(id => prev[id].clientId === studentClientId);
-
-              if (!lookupId) {
-                console.warn('⚠️ Student not found for stroke update. studentId:', studentId, 'clientId:', studentClientId);
-                return prev;
-              }
-
-              console.log('✅ Updating student', lookupId, 'with', (lines || []).length, 'lines');
-
-              return {
-                ...prev,
-                [lookupId]: {
-                  ...prev[lookupId],
-                  lines: lines || [],
-                }
-              };
-            });
-          });
-
-          studentCh.subscribe('student-visibility', (message) => {
-            const { studentId, studentName, isVisible } = message.data;
-
-            if (!studentId) return;
-
-            setStudents(prev => {
-              const student = prev[studentId];
-              if (!student) return prev;
-
-              const wasInactive = student.isVisible === false;
-
-              if (!isVisible) {
-                showToast(`⚠️ ${studentName} switched away`, 'warning');
-              } else if (wasInactive) {
-                showToast(`✓ ${studentName} returned`, 'success');
-              }
-
-              return {
-                ...prev,
-                [studentId]: {
-                  ...student,
-                  isVisible: isVisible,
-                  lastVisibilityChange: Date.now(),
-                }
-              };
-            });
-          });
-
-          studentCh.subscribe('request-current-state', (message) => {
-            const requestingStudentId = message.data?.studentId;
-
-            setTimeout(() => {
-              try {
-                if (!studentCh || studentCh.state !== 'attached') {
-                  console.warn('⚠️ Cannot send sync-full-state: channel not ready');
-                  return;
-                }
-
-                const annotations = teacherAnnotationsRef.current?.[requestingStudentId] || [];
-
-                studentCh.publish('sync-full-state', {
-                  content: sharedImageRef.current || null,
-                  annotations: annotations,
-                  timestamp: Date.now(),
-                });
-              } catch (error) {
-                console.error('❌ Error sending sync-full-state on request:', error);
-              }
-            }, 100);
-          });
-
-          studentCh.subscribe('request-teacher-annotations', async (message) => {
-            const requestingStudentId = message.data?.studentId;
-            const requestingClientId = message.data?.clientId;
-
-            console.log(`📨 Received annotation request from student ${requestingStudentId}`);
-
-            try {
-              const { loadAllTeacherAnnotations } = await import('../utils/indexedDB');
-              const allAnnotations = await loadAllTeacherAnnotations(roomId, 'teacher');
-              const annotations = allAnnotations[requestingStudentId] || [];
-
-              console.log(`📤 Sending ${annotations.length} teacher annotations to student ${requestingStudentId}`);
-
-              setTimeout(() => {
-                if (studentCh && studentCh.state === 'attached') {
-                  studentCh.publish('response-teacher-annotations', {
-                    targetStudentId: requestingStudentId,
-                    targetClientId: requestingClientId,
-                    annotations: annotations,
-                    timestamp: Date.now(),
-                  });
-                }
-              }, 100);
-            } catch (error) {
-              console.error('❌ Error loading annotations from IndexedDB:', error);
-            }
-          });
-
-          studentCh.subscribe('response-student-strokes', (message) => {
-            const studentId = message.data?.studentId;
-            const studentLines = message.data?.strokes || [];
-            const studentName = message.data?.studentName;
-
-            console.log(`📨 Received ${studentLines.length} strokes from student ${studentName} (${studentId})`);
-
-            if (studentId && studentLines.length > 0) {
-              setStudents(prevStudents => {
-                const existing = prevStudents[studentId];
-                if (existing) {
-                  return {
-                    ...prevStudents,
-                    [studentId]: {
-                      ...existing,
-                      lines: studentLines,
-                    }
-                  };
-                }
-                return prevStudents;
-              });
-            }
-          });
+          // Subscribe to all student messages using helper function
+          subscribeToStudentChannel(studentCh, memberStudentId);
 
           newChannels[memberStudentId] = studentCh;
 
@@ -1558,8 +1437,8 @@ const TeacherDashboard = () => {
   };
 
   const handleSendToClass = async () => {
-    if (!channel || !sessionId || !isConnected) {
-      console.error('Cannot send: channel or sessionId missing', { channel: !!channel, sessionId, isConnected });
+    if (!broadcastChannel || !sessionId || !isConnected) {
+      console.error('Cannot send: broadcastChannel or sessionId missing', { broadcastChannel: !!broadcastChannel, sessionId, isConnected });
       setImageMessage('Error: Not connected properly. Please refresh the page.');
       showToast('Failed to send: Connection issue', 'error');
       return;
