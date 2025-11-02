@@ -67,7 +67,7 @@ function StudentLogin() {
         });
       });
 
-      const channel = ably.channels.get(`room-${sessionCode.trim().toUpperCase()}`);
+      const channel = ably.channels.get(`${sessionCode.trim().toUpperCase()}-broadcast`);
       const members = await channel.presence.get();
       const teacherPresent = members.some(member => member.clientId.startsWith('teacher-'));
 
