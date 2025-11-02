@@ -357,6 +357,7 @@ const Student: React.FC = () => {
 
     sessionInitRoomRef.current = roomId;
     let cancelled = false;
+    let pollInterval: NodeJS.Timeout | null = null;
 
     const validateSession = async () => {
       try {
@@ -384,7 +385,46 @@ const Student: React.FC = () => {
         }
 
         setSessionId(session.id);
-        setSessionStatus(session.status === 'active' ? 'active' : 'waiting');
+        const newStatus = session.status === 'active' ? 'active' : 'waiting';
+        setSessionStatus(newStatus);
+
+        // If status is 'waiting', poll periodically to check if teacher has started the session
+        if (newStatus === 'waiting') {
+          pollInterval = setInterval(async () => {
+            if (cancelled) {
+              if (pollInterval) {
+                clearInterval(pollInterval);
+                pollInterval = null;
+              }
+              return;
+            }
+
+            try {
+              const pollResponse = await fetch(`/api/sessions/${roomId}`);
+              if (pollResponse.ok) {
+                const pollSession = await pollResponse.json();
+                if (pollSession.status === 'active') {
+                  console.log('✅ Session became active via polling');
+                  setSessionStatus('active');
+                  if (pollInterval) {
+                    clearInterval(pollInterval);
+                    pollInterval = null;
+                  }
+                } else if (pollSession.status === 'ended') {
+                  console.log('Session ended');
+                  setSessionStatus('ended');
+                  if (pollInterval) {
+                    clearInterval(pollInterval);
+                    pollInterval = null;
+                  }
+                  setTimeout(() => navigate('/student-login'), 3000);
+                }
+              }
+            } catch (pollError) {
+              console.warn('Error polling session status:', pollError);
+            }
+          }, 2000); // Poll every 2 seconds
+        }
 
       } catch (error) {
         console.error('Error validating session:', error);
@@ -396,6 +436,10 @@ const Student: React.FC = () => {
     validateSession();
     return () => {
       cancelled = true;
+      if (pollInterval) {
+        clearInterval(pollInterval);
+        pollInterval = null;
+      }
     };
   }, [roomId, clientId, studentName, navigate]);
 

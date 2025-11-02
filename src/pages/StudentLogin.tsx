@@ -90,7 +90,9 @@ const StudentLogin: React.FC = () => {
         });
       });
 
-      const channel = ably.channels.get(`room-${sessionCode.trim().toUpperCase()}`);
+      const channel = ably.channels.get(`${sessionCode.trim().toUpperCase()}-student`);
+      // Attach to channel to ensure we can read presence
+      await channel.attach();
       const members = await channel.presence.get();
       const teacherPresent = members.some(member => member.clientId.startsWith('teacher-'));
 

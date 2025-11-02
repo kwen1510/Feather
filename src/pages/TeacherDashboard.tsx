@@ -834,6 +834,40 @@ const TeacherDashboard: React.FC = () => {
           timestamp: Date.now()
         });
 
+        // Update session status to 'active' if it's still 'created' (so students can join immediately)
+        // Fetch current session status to ensure we have the latest value
+        try {
+          const currentSessionResponse = await fetch(`/api/sessions/${roomId}`);
+          if (currentSessionResponse.ok) {
+            const currentSession = await currentSessionResponse.json();
+            if (currentSession.status === 'created' && currentSession.id) {
+              const statusResponse = await fetch(`/api/sessions/${roomId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ status: 'active' }),
+              });
+
+              if (statusResponse.ok) {
+                console.log('✅ Session status updated to active');
+                setSessionStatus('active');
+                setSessionId(currentSession.id);
+                setIsNewSession(false);
+                
+                // Publish session-started event so students already connected can update their status
+                await teacherCh.publish('session-started', {
+                  timestamp: Date.now(),
+                  sessionId: currentSession.id,
+                });
+              } else {
+                console.warn('⚠️ Failed to update session status to active:', statusResponse.statusText);
+              }
+            }
+          }
+        } catch (statusError) {
+          console.error('❌ Error updating session status to active:', statusError);
+          // Don't block connection if status update fails
+        }
+
         // Load existing students who are already in the room
         const existingMembers = await studentCh.presence.get();
 
