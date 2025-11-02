@@ -284,24 +284,9 @@ function Student() {
   const currentLineRef = useRef(null);
   const animationFrameRef = useRef(null);
 
-  // Sync student lines to Ably (publish to teacher)
-  useEffect(() => {
-    if (!isRemoteUpdate.current && channel) {
-      const timer = setTimeout(() => {
-        channel.publish('student-layer', {
-          lines: studentLines,
-          studentId,          // Persistent ID (primary key)
-          clientId,           // Volatile ID (backward compatibility)
-          meta: {
-            display: canvasSize,
-            scale: canvasScale,
-          },
-        });
-        console.log('📤 Published student layer:', studentLines.length, 'lines (studentId:', studentId, ')');
-      }, 150);
-      return () => clearTimeout(timer);
-    }
-  }, [studentLines, channel, clientId, studentId, canvasSize, canvasScale]);
+  // NOTE: Real-time publishing removed to reduce message count
+  // Publishing now happens only when stroke completes (in handlePointerUp)
+  // This reduces messages from ~30 per stroke to 1 per stroke
 
   // Redis auto-save removed - now using IndexedDB + Ably recovery only
 
@@ -511,8 +496,10 @@ function Student() {
           channelSubscriptions.push({ event, handler });
         };
 
-        // Students ignore student-layer broadcasts to avoid echo
-        subscribe('student-layer', () => {});
+        // Students DO NOT subscribe to student-layer to avoid being charged for peer messages
+        // Subscribing (even with empty handler) still causes Ably to deliver all messages
+        // With 50 students, this would be 50×50 = 2,500 msg/sec overhead!
+        // Students only need to PUBLISH to student-layer (no subscribe needed)
 
         // Listen for teacher annotations and filter by targetStudentId
         subscribe('teacher-annotation', (message) => {
@@ -1032,7 +1019,7 @@ function Student() {
     
     setIsDrawing(false);
 
-    // Save the stroke to IndexedDB immediately after drawing (150ms delay)
+    // Save the stroke to IndexedDB and publish to Ably when complete
     if (wasPen && currentLineRef.current && currentLineRef.current.strokeId) {
       const strokeToSave = currentLineRef.current;
       setTimeout(async () => {
@@ -1041,19 +1028,47 @@ function Student() {
           console.log('1️⃣ Drawing finished - Storing stroke in IndexedDB...');
           await saveStrokeToIndexedDB(strokeToSave, roomId, studentId, 'student', sessionId);
           console.log('✅ Stroke saved to IndexedDB:', strokeToSave.strokeId);
+
+          // 2) Publish completed stroke to Ably (single message per stroke)
+          if (channel) {
+            channel.publish('student-layer', {
+              lines: studentLinesRef.current,
+              studentId,
+              clientId,
+              meta: {
+                display: canvasSize,
+                scale: canvasScale,
+              },
+            });
+            console.log('📤 Published completed stroke to Ably');
+          }
         } catch (error) {
           console.error('❌ Error saving stroke to IndexedDB:', error);
         }
       }, 150);
     }
     
-    // If eraser was used, sync the entire state to IndexedDB
+    // If eraser was used, sync the entire state to IndexedDB and publish to Ably
     if (wasEraser) {
       setTimeout(async () => {
         try {
           console.log('🗑️ Eraser used - Syncing remaining strokes to IndexedDB...');
           await replaceAllStrokesInIndexedDB(studentLinesRef.current, roomId, studentId, 'student', sessionId);
           console.log('✅ Eraser: Synced to IndexedDB');
+
+          // Publish updated state after erase
+          if (channel) {
+            channel.publish('student-layer', {
+              lines: studentLinesRef.current,
+              studentId,
+              clientId,
+              meta: {
+                display: canvasSize,
+                scale: canvasScale,
+              },
+            });
+            console.log('📤 Published after erase to Ably');
+          }
         } catch (error) {
           console.error('❌ Error syncing eraser changes to IndexedDB:', error);
         }
@@ -1068,11 +1083,25 @@ function Student() {
       const previousState = undoStack.current.pop();
       redoStack.current.push([...studentLines]);
       setStudentLines(previousState);
-      
-      // Sync with IndexedDB
+
+      // Sync with IndexedDB and publish to Ably
       try {
         await replaceAllStrokesInIndexedDB(previousState, roomId, studentId, 'student', sessionId);
         console.log('✅ Undo: Synced to IndexedDB');
+
+        // Publish updated state
+        if (channel) {
+          channel.publish('student-layer', {
+            lines: previousState,
+            studentId,
+            clientId,
+            meta: {
+              display: canvasSize,
+              scale: canvasScale,
+            },
+          });
+          console.log('📤 Published undo to Ably');
+        }
       } catch (error) {
         console.error('❌ Error syncing undo to IndexedDB:', error);
       }
@@ -1084,11 +1113,25 @@ function Student() {
       const nextState = redoStack.current.pop();
       undoStack.current.push([...studentLines]);
       setStudentLines(nextState);
-      
-      // Sync with IndexedDB
+
+      // Sync with IndexedDB and publish to Ably
       try {
         await replaceAllStrokesInIndexedDB(nextState, roomId, studentId, 'student', sessionId);
         console.log('✅ Redo: Synced to IndexedDB');
+
+        // Publish updated state
+        if (channel) {
+          channel.publish('student-layer', {
+            lines: nextState,
+            studentId,
+            clientId,
+            meta: {
+              display: canvasSize,
+              scale: canvasScale,
+            },
+          });
+          console.log('📤 Published redo to Ably');
+        }
       } catch (error) {
         console.error('❌ Error syncing redo to IndexedDB:', error);
       }
@@ -1099,11 +1142,25 @@ function Student() {
     undoStack.current.push([...studentLines]);
     redoStack.current = [];
     setStudentLines([]);
-    
-    // Clear from IndexedDB
+
+    // Clear from IndexedDB and publish to Ably
     try {
       await clearStrokesFromIndexedDB(roomId, studentId, 'student');
       console.log('✅ Clear: Synced to IndexedDB');
+
+      // Publish cleared state
+      if (channel) {
+        channel.publish('student-layer', {
+          lines: [],
+          studentId,
+          clientId,
+          meta: {
+            display: canvasSize,
+            scale: canvasScale,
+          },
+        });
+        console.log('📤 Published clear to Ably');
+      }
     } catch (error) {
       console.error('❌ Error clearing IndexedDB:', error);
     }
