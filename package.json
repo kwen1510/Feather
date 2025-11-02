@@ -11,8 +11,7 @@
     "test:e2e:remote": "playwright test -c PLAYWRIGHT/playwright.config.ts"
   },
   "dependencies": {
-    "@neondatabase/serverless": "^0.11.5",
-    "@vercel/postgres": "^0.12.1",
+    "@neondatabase/serverless": "^1.0.2",
     "ably": "^1.2.46",
     "dotenv": "^17.2.3",
     "heic2any": "^0.0.4",

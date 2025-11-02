@@ -46,3 +46,4 @@ database/
 
 # SQL migration files (handled separately)
 *.sql
+.vercel
