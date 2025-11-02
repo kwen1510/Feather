@@ -34,10 +34,6 @@ playwright.config.ts
 *.test.ts
 *.test.js
 
-# Documentation (keep main README)
-*.md
-!README.md
-
 # Load testing
 load-testing/
 
