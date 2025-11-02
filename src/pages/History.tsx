@@ -1,7 +1,9 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Stage, Layer, Line, Image as KonvaImage } from 'react-konva';
 import useImage from 'use-image';
-import { supabase } from '../supabaseClient';
+import { useSessions } from '../hooks/useSessions';
+import { useQuestions } from '../hooks/useQuestions';
+import { useResponses } from '../hooks/useResponses';
 import './History.css';
 
 const BASE_CANVAS = { width: 800, height: 600 };
@@ -274,181 +276,55 @@ const ResponseCard = ({ response, background }) => {
 };
 
 const History: React.FC = () => {
-  const [sessions, setSessions] = useState([]);
-  const [sessionsLoading, setSessionsLoading] = useState(true);
-  const [sessionsError, setSessionsError] = useState(null);
-
-  const [selectedSessionId, setSelectedSessionId] = useState(null);
-  const [questions, setQuestions] = useState([]);
-  const [questionsLoading, setQuestionsLoading] = useState(false);
-  const [questionsError, setQuestionsError] = useState(null);
-
-  const [selectedQuestionId, setSelectedQuestionId] = useState(null);
+  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
+  const [selectedQuestionId, setSelectedQuestionId] = useState<string | null>(null);
   const [questionFilter, setQuestionFilter] = useState('');
 
-  const [responses, setResponses] = useState([]);
-  const [responsesLoading, setResponsesLoading] = useState(false);
-  const [responsesError, setResponsesError] = useState(null);
+  // Fetch sessions
+  const {
+    data: sessions = [],
+    isLoading: sessionsLoading,
+    error: sessionsError,
+    refetch: refetchSessions,
+  } = useSessions();
 
-  const fetchSessions = useCallback(async () => {
-    setSessionsLoading(true);
-    setSessionsError(null);
-
-    try {
-      const { data, error } = await supabase
-        .from('sessions')
-        .select('*')
-        .order('created_at', { ascending: false });
-
-      if (error) {
-        throw error;
-      }
-
-      const safeData = data || [];
-      setSessions(safeData);
-
-      setSelectedSessionId((current) => {
-        if (!safeData.length) {
-          return null;
-        }
-        if (current && safeData.some((session) => session.id === current)) {
-          return current;
-        }
-        return safeData[0].id;
-      });
-    } catch (error) {
-      console.error('Failed to load sessions', error);
-      setSessionsError('Failed to load sessions. Please retry.');
-      setSessions([]);
+  // Auto-select first session when sessions load
+  useEffect(() => {
+    if (sessions.length > 0 && !selectedSessionId) {
+      setSelectedSessionId(sessions[0].id);
+    } else if (sessions.length === 0) {
       setSelectedSessionId(null);
-    } finally {
-      setSessionsLoading(false);
+    } else if (selectedSessionId && !sessions.some((s) => s.id === selectedSessionId)) {
+      // Current selection no longer exists, select first
+      setSelectedSessionId(sessions[0]?.id || null);
     }
-  }, []);
+  }, [sessions, selectedSessionId]);
 
-  useEffect(() => {
-    fetchSessions();
-  }, [fetchSessions]);
+  // Fetch questions for selected session
+  const {
+    data: questions = [],
+    isLoading: questionsLoading,
+    error: questionsError,
+  } = useQuestions(selectedSessionId);
 
+  // Auto-select first question when questions load
   useEffect(() => {
-    if (!selectedSessionId) {
-      setQuestions([]);
+    if (questions.length > 0 && !selectedQuestionId) {
+      setSelectedQuestionId(questions[0].id);
+    } else if (questions.length === 0) {
       setSelectedQuestionId(null);
-      return;
+    } else if (selectedQuestionId && !questions.some((q) => q.id === selectedQuestionId)) {
+      // Current selection no longer exists, select first
+      setSelectedQuestionId(questions[0]?.id || null);
     }
+  }, [questions, selectedQuestionId]);
 
-    let isCancelled = false;
-
-    const loadQuestions = async () => {
-      setQuestionsLoading(true);
-      setQuestionsError(null);
-
-      try {
-        const { data, error } = await supabase
-          .from('questions')
-          .select('*')
-          .eq('session_id', selectedSessionId)
-          .order('question_number', { ascending: true });
-
-        if (error) {
-          throw error;
-        }
-
-        if (!isCancelled) {
-          setQuestions(data || []);
-          if (data?.length) {
-            setSelectedQuestionId((current) => {
-              if (current && data.some((q) => q.id === current)) {
-                return current;
-              }
-              return data[0].id;
-            });
-          } else {
-            setSelectedQuestionId(null);
-          }
-        }
-      } catch (error) {
-        console.error('Failed to load questions', error);
-        if (!isCancelled) {
-          setQuestionsError('Unable to load questions for this session.');
-          setQuestions([]);
-          setSelectedQuestionId(null);
-        }
-      } finally {
-        if (!isCancelled) {
-          setQuestionsLoading(false);
-        }
-      }
-    };
-
-    loadQuestions();
-
-    return () => {
-      isCancelled = true;
-    };
-  }, [selectedSessionId]);
-
-  useEffect(() => {
-    if (!selectedQuestionId) {
-      setResponses([]);
-      return;
-    }
-
-    let isCancelled = false;
-
-    const loadResponses = async () => {
-      setResponsesLoading(true);
-      setResponsesError(null);
-
-      try {
-        const { data, error } = await supabase
-          .from('annotations')
-          .select(
-            `
-              id,
-              student_lines,
-              teacher_annotations,
-              created_at,
-              last_updated_at,
-              participant:participants!inner (
-                id,
-                name,
-                student_id,
-                client_id,
-                role
-              )
-            `
-          )
-          .eq('question_id', selectedQuestionId)
-          .eq('participant.role', 'student')
-          .order('created_at', { ascending: true });
-
-        if (error) {
-          throw error;
-        }
-
-        if (!isCancelled) {
-          setResponses(data || []);
-        }
-      } catch (error) {
-        console.error('Failed to load responses', error);
-        if (!isCancelled) {
-          setResponsesError('Unable to load responses for this question.');
-          setResponses([]);
-        }
-      } finally {
-        if (!isCancelled) {
-          setResponsesLoading(false);
-        }
-      }
-    };
-
-    loadResponses();
-
-    return () => {
-      isCancelled = true;
-    };
-  }, [selectedQuestionId]);
+  // Fetch responses for selected question
+  const {
+    data: responses = [],
+    isLoading: responsesLoading,
+    error: responsesError,
+  } = useResponses(selectedQuestionId);
 
   const selectedSession = useMemo(
     () => sessions.find((session) => session.id === selectedSessionId) || null,
@@ -502,7 +378,7 @@ const History: React.FC = () => {
           <h1>Session History</h1>
           <button
             className="history-refresh"
-            onClick={fetchSessions}
+            onClick={() => refetchSessions()}
             disabled={sessionsLoading}
           >
             Refresh
@@ -529,7 +405,11 @@ const History: React.FC = () => {
             </select>
           )}
           {sessionsError && (
-            <div className="history-error">{sessionsError}</div>
+            <div className="history-error">
+              {sessionsError instanceof Error
+                ? sessionsError.message
+                : 'Failed to load sessions. Please retry.'}
+            </div>
           )}
           {selectedSession && (
             <div className="history-session-meta">
@@ -607,7 +487,11 @@ const History: React.FC = () => {
           )}
 
           {questionsError && (
-            <div className="history-error">{questionsError}</div>
+            <div className="history-error">
+              {questionsError instanceof Error
+                ? questionsError.message
+                : 'Unable to load questions for this session.'}
+            </div>
           )}
         </div>
       </aside>
@@ -635,7 +519,9 @@ const History: React.FC = () => {
 
             {responsesError && (
               <div className="history-error history-error-inline">
-                {responsesError}
+                {responsesError instanceof Error
+                  ? responsesError.message
+                  : 'Unable to load responses for this question.'}
               </div>
             )}
 

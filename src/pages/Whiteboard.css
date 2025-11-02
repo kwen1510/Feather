@@ -236,41 +236,6 @@
 
 /* Don't override Stage dimensions - let canvas be its natural size */
 
-/* tldraw container */
-.tldraw-container {
-  flex: 1;
-  position: relative;
-  width: 100%;
-  height: 100%;
-  overflow: hidden;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-}
-
-/* Fixed canvas size wrapper */
-.tldraw-wrapper {
-  position: relative;
-  width: 100%;
-  max-width: 1200px;
-  height: 100%;
-  max-height: 700px;
-  border: 2px solid #ddd;
-  border-radius: 8px;
-  overflow: hidden;
-  background: white;
-}
-
-/* Disable infinite canvas - lock to viewport */
-.tldraw-wrapper .tl-canvas {
-  overflow: hidden !important;
-}
-
-/* Lock camera to prevent panning beyond bounds */
-.tldraw-wrapper .tl-background {
-  pointer-events: none;
-}
-
 /* Student canvas container - overlays layers on top of each other */
 .student-canvas-container {
   position: relative;
@@ -308,29 +273,6 @@
 /* For TEACHER view: student layer is read-only (no pointer events) */
 .whiteboard.teacher .student-drawing-layer {
   pointer-events: none;
-}
-
-/* Make overlay canvas backgrounds transparent */
-.teacher-overlay-layer .tl-background {
-  display: none !important;
-}
-
-.teacher-overlay-layer .tl-grid {
-  display: none !important;
-}
-
-/* Hide tldraw's style panel and other UI for minimal experience */
-.tldraw .tlui-style-panel,
-.tldraw .tlui-actions-menu,
-.tldraw .tlui-context-menu,
-.tldraw .tlui-quick-actions,
-.tldraw .tlui-help-menu {
-  display: none !important;
-}
-
-/* Keep only the main toolbar with pen and eraser */
-.tldraw .tlui-toolbar {
-  pointer-events: auto !important;
 }
 
 .layer-badge {
