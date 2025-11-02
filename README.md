@@ -8,7 +8,7 @@ This is a **production-ready** application deployed on Vercel that includes:
 - ✅ Full React application source code
 - ✅ Vercel Serverless Functions for API endpoints
 - ✅ Real-time collaboration via Ably
-- ✅ Data persistence via Supabase
+- ✅ Data persistence via Neon Postgres
 - ✅ Automatic deployments via Git
 
 ## Quick Start
@@ -30,10 +30,7 @@ This is a **production-ready** application deployed on Vercel that includes:
 
 4. **Configure environment variables** in Vercel dashboard:
    - `ABLY_API_KEY` - Your Ably API key
-   - `VITE_SUPABASE_URL` - Your Supabase project URL
-   - `VITE_SUPABASE_ANON_KEY` - Your Supabase anonymous key
-   - `SUPABASE_URL` - Same as VITE_SUPABASE_URL (backend fallback)
-   - `SUPABASE_ANON_KEY` - Same as VITE_SUPABASE_ANON_KEY (backend fallback)
+   - `POSTGRES_URL` - Neon Postgres connection string (auto-configured via Vercel Neon integration)
 
 5. **Redeploy** after adding environment variables:
    ```bash
@@ -56,7 +53,7 @@ For detailed instructions, see **[VERCEL_DEPLOY.md](VERCEL_DEPLOY.md)**
 ├── api/                    # Vercel Serverless Functions
 │   ├── token.ts           # Ably token generation
 │   └── strokes/
-│       └── persist.ts     # Supabase persistence
+│       └── persist.ts     # Neon Postgres persistence
 │
 ├── index.html              # HTML entry point
 ├── package.json            # Dependencies
@@ -64,8 +61,6 @@ For detailed instructions, see **[VERCEL_DEPLOY.md](VERCEL_DEPLOY.md)**
 ├── vercel.json             # Vercel configuration
 │
 ├── VERCEL_DEPLOY.md        # 📖 Complete deployment guide
-├── VERCEL_ENV.md           # 🔐 Environment variables guide
-├── MIGRATION_SUMMARY.md    # 📋 Migration overview
 ├── APP_README.md           # 📱 Application documentation
 └── README.md               # This file
 ```
@@ -119,8 +114,76 @@ npm run dev
 The app will be available at `http://localhost:5000` (or the port Vercel assigns)
 
 **Note**: For local development, you'll need to:
-- Create a `.env.local` file with your environment variables (see `VERCEL_ENV.md`)
+- Create a `.env.local` file with your environment variables (see [VERCEL_DEPLOY.md](VERCEL_DEPLOY.md#environment-variables))
 - Or `vercel dev` will use environment variables from your Vercel project
+
+### Set Up Environment Variables
+
+Create a `.env.local` file in the project root:
+
+```bash
+# Ably API Key (required for real-time features)
+ABLY_API_KEY=your-ably-api-key-here
+
+# Neon Postgres Connection (required for database operations)
+POSTGRES_URL=postgresql://user:password@host/database?sslmode=require
+```
+
+**Get your Ably API Key:**
+1. Sign up at https://ably.com (free tier available)
+2. Go to your dashboard
+3. Copy your API key (format: `app-key-id:secret-key`)
+
+**Get your Postgres URL:**
+- Option A: Use Vercel's Neon integration (recommended)
+  1. Go to Vercel dashboard → Your Project → Storage
+  2. Create a Neon database
+  3. Copy the `POSTGRES_URL` from environment variables
+  
+- Option B: Use your own Neon database
+  1. Sign up at https://neon.tech
+  2. Create a database
+  3. Copy the connection string
+
+### Set Up Database Schema
+
+If using a new database, run the schema migration:
+
+1. Open Neon SQL Editor (or connect via psql)
+2. Run the contents of `neon-schema.sql` from the project root
+
+The schema creates the following tables:
+- `sessions` - Tracks classroom sessions
+- `participants` - Tracks teachers and students in sessions
+- `questions` - Tracks content sent by teachers
+- `annotations` - Stores student drawings and teacher feedback
+
+### Testing Locally
+
+**Test Real-time Collaboration:**
+1. Open the app in two browser windows/tabs
+2. Create a session as a teacher in one window
+3. Join as a student in the other window using the room code
+4. Draw on the canvas - changes should sync in real-time
+
+**Test API Endpoints:**
+- `GET /api/token?clientId=<id>` - Get Ably authentication token
+- `GET /api/sessions` - List all sessions
+- `GET /api/questions/[sessionId]` - Get questions for a session
+- `POST /api/strokes/persist` - Save annotations
+
+Test them with:
+```bash
+# Example: Get Ably token
+curl http://localhost:3000/api/token?clientId=test-client
+```
+
+**Troubleshooting:**
+
+- **Environment Variables Not Loading**: Ensure `.env.local` is in the project root, restart dev server after changes
+- **Database Connection Errors**: Verify `POSTGRES_URL` is correct, ensure SSL mode is enabled (`?sslmode=require`)
+- **Ably Connection Errors**: Verify `ABLY_API_KEY` format is `app-key-id:secret-key`
+- **Port Already in Use**: Vercel dev will auto-assign a different port, or specify with `PORT=3001 vercel dev`
 
 ## Deployment
 
@@ -133,45 +196,12 @@ The application is configured for automatic deployment on Vercel:
 3. Configure environment variables
 4. Deploy automatically on every push
 
-See **[VERCEL_DEPLOY.md](VERCEL_DEPLOY.md)** for complete instructions.
-
-### Environment Variables
-
-Required environment variables:
-- `ABLY_API_KEY` - Ably API key for real-time messaging
-- `POSTGRES_URL` - Neon Postgres connection string (auto-configured via Vercel)
-
-See **[VERCEL_ENV.md](VERCEL_ENV.md)** for details.
-
-### Database Setup
-
-After deploying to Vercel and setting up your Neon Postgres database, you need to initialize the database schema:
-
-**Option 1: Use the API endpoint (Recommended)**
-```bash
-curl -X POST https://your-app.vercel.app/api/db/init
-```
-
-**Option 2: Run SQL manually**
-1. Open your Neon dashboard
-2. Go to the SQL Editor
-3. Copy and paste the contents of `neon-schema.sql` from the project root
-4. Execute the SQL
-
-The schema creates the following tables:
-- `sessions` - Tracks classroom sessions
-- `participants` - Tracks teachers and students in sessions
-- `questions` - Tracks content sent by teachers
-- `annotations` - Stores student drawings and teacher feedback
-
-**Note**: If you see errors like "relation 'sessions' does not exist", the database schema hasn't been initialized yet.
+See **[VERCEL_DEPLOY.md](VERCEL_DEPLOY.md)** for complete deployment instructions.
 
 ## Documentation
 
-- **[VERCEL_DEPLOY.md](VERCEL_DEPLOY.md)** - Complete Vercel deployment guide
-- **[VERCEL_ENV.md](VERCEL_ENV.md)** - Environment variables documentation
+- **[VERCEL_DEPLOY.md](VERCEL_DEPLOY.md)** - Complete Vercel deployment guide with environment variables
 - **[APP_README.md](APP_README.md)** - Application features and architecture
-- **[MIGRATION_SUMMARY.md](MIGRATION_SUMMARY.md)** - Migration from Digital Ocean to Vercel
 
 ## Prerequisites
 
@@ -218,7 +248,6 @@ Vercel Edge Network (CDN)
 
 - **Deployment Issues**: See [VERCEL_DEPLOY.md](VERCEL_DEPLOY.md#troubleshooting)
 - **Application Issues**: See [APP_README.md](APP_README.md)
-- **Environment Setup**: See [VERCEL_ENV.md](VERCEL_ENV.md)
 
 ## License
 

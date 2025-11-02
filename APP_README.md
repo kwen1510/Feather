@@ -26,74 +26,17 @@ A two-layer collaborative whiteboard application designed for classroom use, ena
 - **Real-time**: Ably Realtime SDK
 - **Routing**: React Router v6
 - **Backend**: Vercel Serverless Functions
-- **Database**: Supabase (PostgreSQL)
+- **Database**: Neon Postgres
 - **Deployment**: Vercel
 
 ## Prerequisites
 
 - Node.js (v18 or higher recommended)
-- npm or yarn
 - An Ably account and API key ([Get one free at ably.com](https://ably.com))
-- A Supabase project ([Get free tier](https://supabase.com))
+- A Neon Postgres database (via Vercel integration)
 - A Vercel account ([Sign up free](https://vercel.com))
 
-## Setup and Installation
-
-### 1. Install Dependencies
-
-```bash
-npm install
-```
-
-### 2. Configure Environment Variables
-
-Create a `.env.local` file in the project root:
-
-```bash
-ABLY_API_KEY=your-app-key:your-secret-key
-VITE_SUPABASE_URL=https://your-project.supabase.co
-VITE_SUPABASE_ANON_KEY=your-supabase-anon-key
-```
-
-Or use Vercel CLI to pull environment variables:
-```bash
-vercel pull
-```
-
-### 3. Run the Application Locally
-
-**Option A: Development Server Only**
-```bash
-npm run dev
-```
-App runs at `http://localhost:5000`
-
-**Option B: With Serverless Functions (Recommended)**
-```bash
-vercel dev
-```
-Runs full Vercel environment locally including API functions.
-
-**Option C: Legacy Local Server (for testing)**
-```bash
-# Terminal 1 - Ably Token Server (Port 8080)
-npm run server
-
-# Terminal 2 - Vite Dev Server (Port 5000)
-npm run dev
-```
-
-### 4. Access the Application
-
-Open your browser and navigate to:
-```
-http://localhost:5000
-```
-
-You'll see a landing page where you can:
-1. Enter a room ID (or use the default "demo")
-2. Choose to join as a Student or Teacher
-3. Open multiple browser windows to test real-time collaboration
+For setup and installation instructions, see [README.md](README.md#local-development).
 
 ## Project Structure
 
@@ -109,7 +52,7 @@ Feather/
 ├── api/                     # Vercel Serverless Functions
 │   ├── token.ts             # Ably token authentication
 │   └── strokes/
-│       └── persist.ts       # Supabase persistence
+│       └── persist.ts       # Neon Postgres persistence
 ├── server.ts                # Legacy server (for local testing)
 ├── index.html               # HTML entry point
 ├── vite.config.ts           # Vite configuration
@@ -207,40 +150,7 @@ useEffect(() => {
 }, [lines, channel, clientId]);
 ```
 
-## Deployment
-
-### Building for Production
-
-```bash
-npm run build
-```
-
-This creates an optimized build in the `dist/` directory.
-
-### Deployment
-
-The application is configured for deployment on Vercel. See **[VERCEL_DEPLOY.md](VERCEL_DEPLOY.md)** for complete instructions.
-
-**Quick deployment:**
-
-1. Install Vercel CLI:
-```bash
-npm i -g vercel
-```
-
-2. Link your project:
-```bash
-vercel link
-```
-
-3. Configure environment variables in Vercel dashboard (see [VERCEL_ENV.md](VERCEL_ENV.md))
-
-4. Deploy:
-```bash
-vercel --prod
-```
-
-**Automatic deployments:** Connect your Git repository to Vercel for automatic deployments on every push.
+For deployment instructions, see **[VERCEL_DEPLOY.md](VERCEL_DEPLOY.md)**.
 
 ## Testing Checklist
 
@@ -264,7 +174,7 @@ Before deploying, verify these requirements:
    - Verify environment variables are set correctly in Vercel dashboard
    - Check `/api/token` endpoint is accessible
    - Check browser console for error messages
-   - For local dev: ensure `vercel dev` is running or `npm run server` is running
+   - For local dev: ensure `vercel dev` is running
 
 2. **Changes not syncing between clients**:
    - Ensure both clients are in the same room
@@ -346,8 +256,8 @@ MIT License - feel free to use this for educational purposes.
 For issues, questions, or contributions:
 - Check the browser console for error messages
 - Verify Ably connection status
-- Ensure both servers are running
 - Test with multiple browser windows/tabs
+- See [README.md](README.md) for setup and [VERCEL_DEPLOY.md](VERCEL_DEPLOY.md) for deployment help
 
 ## Credits
 

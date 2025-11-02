@@ -47,7 +47,7 @@ const TeacherDashboard: React.FC = () => {
     roomInitialisedRef.current = true;
   }, [searchParams, setSearchParams]);
 
-  // Supabase session tracking (validation only)
+  // Neon Postgres session tracking (validation only)
   const [sessionId, setSessionId] = useState(null);
   const [sessionStatus, setSessionStatus] = useState('created'); // 'created' | 'active' | 'ended'
   const [isNewSession, setIsNewSession] = useState(false); // Track if session is newly created with no students
@@ -270,7 +270,7 @@ const TeacherDashboard: React.FC = () => {
     localStorage.setItem('teacherDashboardCardsPerRow', cardsPerRow.toString());
   }, [cardsPerRow]);
 
-  // Create or get existing session in Supabase when dashboard loads
+  // Create or get existing session in Neon Postgres when dashboard loads
   useEffect(() => {
     if (!roomId) {
       return;
@@ -1384,7 +1384,7 @@ const TeacherDashboard: React.FC = () => {
     setImageMessage('Sending to class...');
 
     try {
-      // STEP 1: Persist current question data to Supabase (if there's data to save)
+      // STEP 1: Persist current question data to Neon Postgres (if there's data to save)
       if (currentQuestionNumber > 0) {
         console.log(`💾 Persisting question ${currentQuestionNumber} before moving to next...`);
 

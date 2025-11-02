@@ -104,7 +104,7 @@ const Student: React.FC = () => {
 
   const sessionInitRoomRef = useRef(null);
 
-  // Supabase session tracking (validation only)
+  // Neon Postgres session tracking (validation only)
   const [sessionId, setSessionId] = useState(null);
   const [sessionStatus, setSessionStatus] = useState('loading'); // 'loading' | 'waiting' | 'active' | 'ended' | 'no-session'
 
