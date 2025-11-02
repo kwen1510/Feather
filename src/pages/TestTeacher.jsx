@@ -54,7 +54,8 @@ const TestTeacher = () => {
 
   // Ably connection
   const [ably, setAbly] = useState(null);
-  const [channel, setChannel] = useState(null);
+  const [studentChannel, setStudentChannel] = useState(null);
+  const [teacherChannel, setTeacherChannel] = useState(null);
   const [isConnected, setIsConnected] = useState(false);
   const [clientId] = useState(`teacher-${Math.random().toString(36).substring(7)}`);
 
@@ -230,7 +231,7 @@ const TestTeacher = () => {
 
       // Publish session-ended event
       if (channel) {
-        await channel.publish('session-ended', {
+        await teacherChannel.publish('session-ended', {
           timestamp: Date.now(),
           reason,
         });
@@ -499,7 +500,7 @@ const TestTeacher = () => {
 
             try {
               // Re-enter presence
-              await whiteboardChannel.presence.enter({
+              await studentCh.presence.enter({
                 role: 'teacher',
                 timestamp: Date.now()
               });
@@ -508,7 +509,7 @@ const TestTeacher = () => {
               setTimeout(async () => {
                 if (whiteboardChannel && whiteboardChannel.state === 'attached') {
                   // Check number of connected students before requesting strokes
-                  const connectedMembers = await whiteboardChannel.presence.get();
+                  const connectedMembers = await studentCh.presence.get();
                   const connectedStudents = connectedMembers.filter(member =>
                     member.clientId &&
                     member.clientId !== clientId &&
@@ -575,12 +576,15 @@ const TestTeacher = () => {
         setAbly(ablyClient);
 
         // Get channel
-        whiteboardChannel = ablyClient.channels.get(`room-${roomId}`);
+        const studentCh = ablyClient.channels.get(`${roomId}-student`);
+        const teacherCh = ablyClient.channels.get(`${roomId}-teacher`);
+
+        whiteboardChannel = studentCh; // Keep reference for cleanup (presence monitoring on student channel)
 
         // Removed: Subscribe to stroke count updates (will be replaced with real-time stroke subscription)
 
         // Listen for presence events (student connect/disconnect)
-        whiteboardChannel.presence.subscribe('enter', (member) => {
+        studentCh.presence.subscribe('enter', (member) => {
           // Skip non-student members
           if (!member.clientId || member.clientId === clientId || !member.clientId.includes('student')) {
             return;
@@ -710,7 +714,7 @@ const TestTeacher = () => {
           }, 300);
         });
 
-        whiteboardChannel.presence.subscribe('leave', (member) => {
+        studentCh.presence.subscribe('leave', (member) => {
           if (member.clientId !== clientId && member.clientId.includes('student')) {
             const leavingStudentId = member.data?.studentId;
 
@@ -884,13 +888,13 @@ const TestTeacher = () => {
         });
 
         // Enter presence with teacher role
-        await whiteboardChannel.presence.enter({
+        await studentCh.presence.enter({
           role: 'teacher',
           timestamp: Date.now()
         });
 
         // Load existing students who are already in the room
-        const existingMembers = await whiteboardChannel.presence.get();
+        const existingMembers = await studentCh.presence.get();
 
         // Update students from presence (merge with existing state)
         setStudents(prevStudents => {
@@ -944,7 +948,8 @@ const TestTeacher = () => {
           return currentStudents;
         });
 
-        setChannel(whiteboardChannel);
+        setStudentChannel(studentCh);
+        setTeacherChannel(teacherCh);
 
         // Load strokes ONLY on page refresh (IndexedDB for teacher, Redis for students)
         // Use sessionStorage flag to reliably detect refresh
@@ -996,7 +1001,7 @@ const TestTeacher = () => {
               setTimeout(async () => {
                 if (whiteboardChannel && whiteboardChannel.state === 'attached') {
                   // Check number of connected students before requesting strokes
-                  const connectedMembers = await whiteboardChannel.presence.get();
+                  const connectedMembers = await studentCh.presence.get();
                   const connectedStudents = connectedMembers.filter(member =>
                     member.clientId &&
                     member.clientId !== clientId &&
@@ -1041,7 +1046,7 @@ const TestTeacher = () => {
       if (whiteboardChannel) {
         // Unsubscribe from all events
         whiteboardChannel.unsubscribe();
-        whiteboardChannel.presence.unsubscribe();
+        studentCh.presence.unsubscribe();
       }
 
       if (ablyClient) {
@@ -1087,7 +1092,7 @@ const TestTeacher = () => {
     }));
 
     // Publish annotations to Ably using current clientId for delivery (for real-time updates)
-    channel.publish('teacher-annotation', {
+    teacherChannel.publish('teacher-annotation', {
       targetStudentId: currentClientId, // Use clientId for Ably delivery
       annotations: annotations,
       teacherId: clientId,
@@ -1232,7 +1237,7 @@ const TestTeacher = () => {
     if (!stagedImage || !channel) return;
 
     try {
-      await channel.publish('teacher-image', stagedImage);
+      await teacherChannel.publish('teacher-image', stagedImage);
       setSharedImage(stagedImage);
       setImageMessage('Image sent to all students.');
     } catch (error) {
@@ -1477,7 +1482,7 @@ const TestTeacher = () => {
         setIsNewSession(false); // Session is no longer new once it's started
 
         // Publish session-started event
-        await channel.publish('session-started', {
+        await teacherChannel.publish('session-started', {
           timestamp: Date.now(),
           sessionId: sessionId,
         });
@@ -1493,7 +1498,7 @@ const TestTeacher = () => {
       // For blank, content stays null
 
       // Clear all student drawings and teacher annotations + send content in ONE message
-      await channel.publish('clear-all-drawings', {
+      await teacherChannel.publish('clear-all-drawings', {
         timestamp: Date.now(),
         content: content, // Include content directly
       });

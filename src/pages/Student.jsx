@@ -93,7 +93,8 @@ function Student() {
   const roomId = searchParams.get('room');
   const studentName = searchParams.get('name');
 
-  const [channel, setChannel] = useState(null);
+  const [studentChannel, setStudentChannel] = useState(null); // For publishing student messages
+  const [teacherChannel, setTeacherChannel] = useState(null); // For receiving teacher messages
 
   const clientIdentityRef = useRef({ roomId: null, studentName: null, clientId: null });
   const [clientId, setClientId] = useState(null);
@@ -439,11 +440,10 @@ function Student() {
           if (hasInitiallyConnected && whiteboardChannel) {
             console.log('🔄 Reconnected - re-entering presence and syncing state');
             try {
-              // Re-enter presence
-              await whiteboardChannel.presence.enter({
+              // Re-enter presence on student channel (simplified: no visibility tracking)
+              await studentCh.presence.enter({
                 name: studentName || 'Anonymous',
-                studentId: studentId || '',
-                isVisible: !document.hidden
+                studentId: studentId || ''
               });
               console.log('✅ Re-entered presence as:', studentName || 'Anonymous', 'with studentId:', studentId || '');
 
@@ -451,20 +451,20 @@ function Student() {
               setTimeout(() => {
                 if (!isActive) return;
                 console.log('🔄 Requesting full state (question + annotations)');
-                whiteboardChannel.publish('request-current-state', {
+                studentCh.publish('request-current-state', {
                   clientId: clientId || '',
                   studentId: studentId || '',
                   timestamp: Date.now(),
                 });
               }, 300);
-              
+
               // Re-publish current strokes to teacher after reconnection
               setTimeout(() => {
                 if (!isActive) return;
                 const currentStrokes = studentLinesRef.current;
                 if (currentStrokes && currentStrokes.length > 0) {
                   console.log('🔄 Re-emitting', currentStrokes.length, 'strokes to teacher after reconnection...');
-                  whiteboardChannel.publish('student-layer', {
+                  studentCh.publish('student-layer', {
                     lines: currentStrokes,
                     studentId: studentId || '',
                     clientId: clientId || '',
@@ -489,10 +489,14 @@ function Student() {
           setIsConnected(false);
         });
 
-        whiteboardChannel = ablyClient.channels.get(`room-${roomId}`);
+        // Create separate channels for student publishing and teacher receiving
+        const studentCh = ablyClient.channels.get(`${roomId}-student`);
+        const teacherCh = ablyClient.channels.get(`${roomId}-teacher`);
+
+        whiteboardChannel = studentCh; // Keep reference for cleanup (presence is on student channel)
 
         const subscribe = (event, handler) => {
-          whiteboardChannel.subscribe(event, handler);
+          teacherCh.subscribe(event, handler); // Subscribe to teacher channel only
           channelSubscriptions.push({ event, handler });
         };
 
@@ -616,10 +620,10 @@ function Student() {
             const ownStrokes = await loadStrokesFromIndexedDB(roomId, studentId, 'student');
             console.log(`📤 Sending ${ownStrokes.length} strokes to teacher`);
 
-            // Send strokes back to teacher
+            // Send strokes back to teacher on student channel
             setTimeout(() => {
-              if (whiteboardChannel && whiteboardChannel.state === 'attached') {
-                whiteboardChannel.publish('response-student-strokes', {
+              if (studentCh && studentCh.state === 'attached') {
+                studentCh.publish('response-student-strokes', {
                   studentId: studentId,
                   studentName: studentName,
                   strokes: ownStrokes,
@@ -633,25 +637,25 @@ function Student() {
           }
         });
 
-        // Enter presence with student name and initial visibility status
-        await whiteboardChannel.presence.enter({
+        // Enter presence on student channel (simplified: only name and studentId, no visibility tracking)
+        await studentCh.presence.enter({
           name: studentName || 'Anonymous',
-          studentId: studentId || '',
-          isVisible: !document.hidden
+          studentId: studentId || ''
         });
 
         if (!isActive) {
-          await whiteboardChannel.presence.leaveClient(clientId);
+          await studentCh.presence.leaveClient(clientId);
           ablyClient.close();
           return;
         }
 
-        setChannel(whiteboardChannel);
+        setStudentChannel(studentCh);
+        setTeacherChannel(teacherCh);
 
-        // Request current state (content + annotations)
+        // Request current state (content + annotations) - publish to student channel
         setTimeout(() => {
           if (!isActive) return;
-          whiteboardChannel.publish('request-current-state', {
+          studentCh.publish('request-current-state', {
             clientId: clientId || '',
             studentId: studentId || '',
             timestamp: Date.now(),
@@ -710,9 +714,9 @@ function Student() {
                   
                   // 4) Explicitly publish loaded strokes to teacher (rejoin after refresh)
                   setTimeout(() => {
-                    if (whiteboardChannel && isActive) {
+                    if (studentCh && isActive) {
                       console.log('4️⃣ Re-emitting strokes to teacher after refresh...');
-                      whiteboardChannel.publish('student-layer', {
+                      studentCh.publish('student-layer', {
                         lines: ownStrokes,
                         studentId,
                         clientId,
@@ -722,7 +726,7 @@ function Student() {
                         },
                       });
                       console.log(`📤 Re-published ${ownStrokes.length} strokes to teacher after rejoin`);
-                      
+
                       // Clear loading state after publishing
                       setIsLoadingData(false);
                     }
@@ -735,8 +739,8 @@ function Student() {
 
               // Request teacher annotations via Ably (teacher will load from IndexedDB and respond)
               console.log('📤 Requesting teacher annotations via Ably...');
-              if (whiteboardChannel && isActive) {
-                whiteboardChannel.publish('request-teacher-annotations', {
+              if (studentCh && isActive) {
+                studentCh.publish('request-teacher-annotations', {
                   studentId: studentId,
                   clientId: clientId,
                   timestamp: Date.now(),
@@ -762,19 +766,23 @@ function Student() {
       isActive = false;
 
       // Always cleanup on unmount (which only happens on actual page unload)
-      if (whiteboardChannel) {
+      // Cleanup both channels
+      if (teacherCh) {
         channelSubscriptions.forEach(({ event, handler }) => {
-          whiteboardChannel.unsubscribe(event, handler);
+          teacherCh.unsubscribe(event, handler);
         });
+      }
 
+      if (studentCh) {
         try {
-          whiteboardChannel.presence.leaveClient(clientId);
+          studentCh.presence.leaveClient(clientId);
         } catch (error) {
           console.error('Error leaving presence:', error);
         }
       }
 
-      setChannel(null);
+      setStudentChannel(null);
+      setTeacherChannel(null);
 
       if (ablyClient) {
         try {
@@ -786,29 +794,25 @@ function Student() {
     };
   }, [clientId, roomId, studentName, navigate, studentId]); // Removed sessionId and currentQuestionId to prevent reconnects
 
-  // Track tab visibility and notify teacher
+  // Track tab visibility and notify teacher (OPTIMIZED: only publish, no presence.update)
   useEffect(() => {
-    // Prevent duplicate listeners in React Strict Mode
-    if (!channel || visibilityListenerAttached.current) return;
+    if (!studentChannel || visibilityListenerAttached.current) return;
 
     visibilityListenerAttached.current = true;
 
     const handleVisibilityChange = () => {
       const isVisible = !document.hidden;
 
-      channel.presence.update({
-        name: studentName || 'Anonymous',
+      // Publish visibility change to student channel (teacher subscribes)
+      // Removed duplicate presence.update() call to save 50% of visibility messages
+      studentChannel.publish('student-visibility', {
         studentId: studentId || '',
-        isVisible: isVisible,
-        lastVisibilityChange: Date.now()
-      });
-
-      channel.publish('student-visibility', {
-        studentId: studentId || '', // Use persistent studentId (teacher state keyed by this)
         studentName: studentName || 'Anonymous',
         isVisible: isVisible,
         timestamp: Date.now()
       });
+
+      console.log(`👁️ Published visibility change: ${isVisible ? 'visible' : 'hidden'}`);
     };
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
@@ -817,7 +821,7 @@ function Student() {
       visibilityListenerAttached.current = false;
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [channel, clientId, studentName]);
+  }, [studentChannel, studentId, studentName]);
 
   // Responsive canvas sizing (preserve 4:3 aspect)
   useEffect(() => {
@@ -1029,9 +1033,9 @@ function Student() {
           await saveStrokeToIndexedDB(strokeToSave, roomId, studentId, 'student', sessionId);
           console.log('✅ Stroke saved to IndexedDB:', strokeToSave.strokeId);
 
-          // 2) Publish completed stroke to Ably (single message per stroke)
-          if (channel) {
-            channel.publish('student-layer', {
+          // 2) Publish completed stroke to Ably on student channel (single message per stroke)
+          if (studentChannel) {
+            studentChannel.publish('student-layer', {
               lines: studentLinesRef.current,
               studentId,
               clientId,
@@ -1056,9 +1060,9 @@ function Student() {
           await replaceAllStrokesInIndexedDB(studentLinesRef.current, roomId, studentId, 'student', sessionId);
           console.log('✅ Eraser: Synced to IndexedDB');
 
-          // Publish updated state after erase
-          if (channel) {
-            channel.publish('student-layer', {
+          // Publish updated state after erase to student channel
+          if (studentChannel) {
+            studentChannel.publish('student-layer', {
               lines: studentLinesRef.current,
               studentId,
               clientId,
@@ -1089,9 +1093,9 @@ function Student() {
         await replaceAllStrokesInIndexedDB(previousState, roomId, studentId, 'student', sessionId);
         console.log('✅ Undo: Synced to IndexedDB');
 
-        // Publish updated state
-        if (channel) {
-          channel.publish('student-layer', {
+        // Publish updated state to student channel
+        if (studentChannel) {
+          studentChannel.publish('student-layer', {
             lines: previousState,
             studentId,
             clientId,
@@ -1119,9 +1123,9 @@ function Student() {
         await replaceAllStrokesInIndexedDB(nextState, roomId, studentId, 'student', sessionId);
         console.log('✅ Redo: Synced to IndexedDB');
 
-        // Publish updated state
-        if (channel) {
-          channel.publish('student-layer', {
+        // Publish updated state to student channel
+        if (studentChannel) {
+          studentChannel.publish('student-layer', {
             lines: nextState,
             studentId,
             clientId,
@@ -1148,9 +1152,9 @@ function Student() {
       await clearStrokesFromIndexedDB(roomId, studentId, 'student');
       console.log('✅ Clear: Synced to IndexedDB');
 
-      // Publish cleared state
-      if (channel) {
-        channel.publish('student-layer', {
+      // Publish cleared state to student channel
+      if (studentChannel) {
+        studentChannel.publish('student-layer', {
           lines: [],
           studentId,
           clientId,
