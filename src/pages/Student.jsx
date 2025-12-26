@@ -1,11 +1,20 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
-import { Stage, Layer, Line, Image as KonvaImage } from 'react-konva';
 import * as Ably from 'ably';
 import { supabase } from '../supabaseClient';
-import { Pen, Eraser, Undo, Redo, Trash2, Pointer, Feather } from 'lucide-react';
 import { getOrCreateStudentId } from '../utils/identity';
-import { initDB, saveStroke as saveStrokeToIndexedDB, loadStrokes as loadStrokesFromIndexedDB, clearStrokes as clearStrokesFromIndexedDB, validateSession, replaceAllStrokes as replaceAllStrokesInIndexedDB } from '../utils/indexedDB';
+import StudentStatusBar from '../components/student/StudentStatusBar';
+import StudentToolbar from '../components/student/StudentToolbar';
+import StudentCanvas from '../components/student/StudentCanvas';
+import SessionStatusOverlay from '../components/student/SessionStatusOverlay';
+import {
+  initDB,
+  saveStroke as saveStrokeToIndexedDB,
+  loadStrokes as loadStrokesFromIndexedDB,
+  clearStrokes as clearStrokesFromIndexedDB,
+  validateSession,
+  replaceAllStrokes as replaceAllStrokesInIndexedDB
+} from '../utils/indexedDB';
 import './StudentNew.css';
 
 // Generate unique stroke ID
@@ -21,70 +30,6 @@ const PREFS_VERSION = 2; // Increment when adding new preferences
 const isMobileDevice = () => {
   return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
     || window.innerWidth <= 768;
-};
-
-// Component to display shared image as background
-const SharedImageLayer = ({ sharedImage, canvasWidth, canvasHeight }) => {
-  const [image, setImage] = useState(null);
-
-  useEffect(() => {
-    if (!sharedImage) {
-      setImage(null);
-      return;
-    }
-
-    const img = new window.Image();
-    img.src = sharedImage.dataUrl;
-    img.onload = () => {
-      setImage(img);
-    };
-  }, [sharedImage]);
-
-  if (!sharedImage || !image) return null;
-
-  // Use actual loaded image dimensions for accurate scaling
-  const imageWidth = image.naturalWidth || image.width;
-  const imageHeight = image.naturalHeight || image.height;
-
-  // Prevent division by zero
-  if (!imageWidth || !imageHeight || !canvasWidth || !canvasHeight) {
-    return null;
-  }
-
-  // Calculate scaling to fit canvas while maintaining aspect ratio
-  const imageAspect = imageWidth / imageHeight;
-  const canvasAspect = canvasWidth / canvasHeight;
-
-  let displayWidth, displayHeight, x, y;
-
-  if (imageAspect > canvasAspect) {
-    // Image is wider than canvas - fit to width
-    displayWidth = canvasWidth;
-    displayHeight = canvasWidth / imageAspect;
-    x = 0;
-    y = (canvasHeight - displayHeight) / 2;
-  } else {
-    // Image is taller than canvas - fit to height
-    displayHeight = canvasHeight;
-    displayWidth = canvasHeight * imageAspect;
-    x = (canvasWidth - displayWidth) / 2;
-    y = 0;
-  }
-
-  // Ensure dimensions don't exceed canvas bounds
-  displayWidth = Math.min(displayWidth, canvasWidth);
-  displayHeight = Math.min(displayHeight, canvasHeight);
-
-  return (
-    <KonvaImage
-      image={image}
-      x={x}
-      y={y}
-      width={displayWidth}
-      height={displayHeight}
-      listening={false}
-    />
-  );
 };
 
 function Student() {
@@ -1205,364 +1150,65 @@ function Student() {
     return null;
   }
 
+  const clientLabel = formatClientLabel();
+
   return (
     <div className="student-canvas-page">
-      {/* Session status overlays */}
-      {sessionStatus === 'loading' && (
-        <div className="session-overlay">
-          <div className="session-message">
-            <div className="session-spinner"></div>
-            <h2>Connecting to session...</h2>
-            <p>Please wait while we verify your session</p>
-          </div>
-        </div>
-      )}
-
-      {sessionStatus === 'waiting' && (
-        <div className="session-overlay">
-          <div className="session-message">
-            <div className="session-icon waiting">⏳</div>
-            <h2>Waiting for teacher</h2>
-            <p>Your teacher hasn't started the session yet. Please wait...</p>
-          </div>
-        </div>
-      )}
-
-      {sessionStatus === 'no-session' && (
-        <div className="session-overlay">
-          <div className="session-message">
-            <div className="session-icon waiting">🔍</div>
-            <h2>No session found</h2>
-            <p>There is no active session for room code "{roomId}".</p>
-            <p style={{ marginTop: '0.5rem', fontSize: '0.9rem' }}>
-              Please make sure your teacher has started a session, or verify the room code is correct.
-            </p>
-            <button
-              onClick={() => navigate('/student-login')}
-              style={{
-                marginTop: '1.5rem',
-                padding: '0.75rem 1.5rem',
-                background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                color: 'white',
-                border: 'none',
-                borderRadius: '8px',
-                fontSize: '1rem',
-                fontWeight: '600',
-                cursor: 'pointer',
-                transition: 'transform 0.2s'
-              }}
-              onMouseEnter={(e) => e.target.style.transform = 'scale(1.05)'}
-              onMouseLeave={(e) => e.target.style.transform = 'scale(1)'}
-            >
-              Back to Login
-            </button>
-          </div>
-        </div>
-      )}
-
-      {sessionStatus === 'ended' && (
-        <div className="session-overlay">
-          <div className="session-message">
-            <div className="session-icon ended">✓</div>
-            <h2>Session ended</h2>
-            <p>Thank you for participating! The teacher has ended this session.</p>
-            <p style={{ marginTop: '1rem', fontSize: '0.9rem', opacity: 0.8 }}>
-              Redirecting to login...
-            </p>
-          </div>
-        </div>
-      )}
+      <SessionStatusOverlay
+        status={sessionStatus}
+        roomId={roomId}
+        onBackToLogin={() => navigate('/student-login')}
+      />
 
       <div className="student-canvas-container">
-        <div className="student-status-bar">
-          <div className="student-status-text">
-            <div className="feather-branding">
-              <Feather size={28} strokeWidth={2} />
-              <span>Feather</span>
-            </div>
-            {roomId && (
-              <span className="session-info">
-                Session: {roomId}
-              </span>
-            )}
-            <span className="student-info">{formatClientLabel()}</span>
-          </div>
-          <div className="student-status-actions">
-            {!isMobile && (
-              <>
-                <div className="tool-status-indicator">
-                  <span className="tool-status-text">
-                    <i className={tool === 'pen' ? 'pi pi-pencil' : 'pi pi-eraser'}></i> {inputMode === 'all' ? 'All inputs' : 'Stylus only'}
-                  </span>
-                </div>
-                <div className={`connection-pill ${connectionStateClass}`} aria-live="polite">
-                  <span className="connection-indicator-dot" />
-                  <span>{connectionLabel}</span>
-                </div>
-                <button className="move-toolbar-btn" onClick={toggleToolbarPosition}>
-                  Move toolbar to {toolbarPosition === 'left' ? 'right' : 'left'}
-                </button>
-              </>
-            )}
-            {isMobile && (
-              <div className={`connection-pill ${connectionStateClass}`} aria-live="polite">
-                <span className="connection-indicator-dot" />
-                <span>{connectionLabel}</span>
-              </div>
-            )}
-          </div>
-        </div>
+        <StudentStatusBar
+          roomId={roomId}
+          clientLabel={clientLabel}
+          tool={tool}
+          inputMode={inputMode}
+          isMobile={isMobile}
+          connectionLabel={connectionLabel}
+          connectionStateClass={connectionStateClass}
+          toolbarPosition={toolbarPosition}
+          onToggleToolbarPosition={toggleToolbarPosition}
+        />
 
-        <div className={`student-workspace ${toolbarPosition === 'right' ? 'toolbar-right' : ''} ${isMobile ? 'mobile-view' : ''}`}>
-          {/* Mobile Toolbar - Compact horizontal layout */}
-          {isMobile ? (
-            <div className="mobile-toolbar">
-              {/* Horizontal color buttons */}
-              <div className="mobile-colors">
-                <button
-                  onClick={() => setColor('black')}
-                  className={`mobile-color-button ${color === 'black' ? 'active' : ''}`}
-                  style={{ background: 'black' }}
-                  aria-label="Black"
-                />
-                <button
-                  onClick={() => setColor('#0066FF')}
-                  className={`mobile-color-button ${color === '#0066FF' ? 'active' : ''}`}
-                  style={{ background: '#0066FF' }}
-                  aria-label="Blue"
-                />
-                <button
-                  onClick={() => setColor('#00AA00')}
-                  className={`mobile-color-button ${color === '#00AA00' ? 'active' : ''}`}
-                  style={{ background: '#00AA00' }}
-                  aria-label="Green"
-                />
-              </div>
+        <div
+          className={`student-workspace ${toolbarPosition === 'right' ? 'toolbar-right' : ''} ${
+            isMobile ? 'mobile-view' : ''
+          }`}
+        >
+          <StudentToolbar
+            isMobile={isMobile}
+            color={color}
+            onColorChange={setColor}
+            tool={tool}
+            onToolChange={setTool}
+            brushSize={brushSize}
+            onBrushSizeChange={setBrushSize}
+            inputMode={inputMode}
+            onToggleInputMode={toggleInputMode}
+            onUndo={handleUndo}
+            onRedo={handleRedo}
+            onClear={handleClear}
+            undoDisabled={undoStack.current.length === 0}
+            redoDisabled={redoStack.current.length === 0}
+          />
 
-              {/* Tool and action buttons */}
-              <div className="mobile-tools">
-                <button
-                  onClick={() => setTool('pen')}
-                  className={`mobile-tool-button ${tool === 'pen' ? 'active' : ''}`}
-                  aria-label="Pen"
-                >
-                  <Pen size={20} />
-                </button>
-                <button
-                  onClick={() => setTool('eraser')}
-                  className={`mobile-tool-button ${tool === 'eraser' ? 'active' : ''}`}
-                  aria-label="Eraser"
-                >
-                  <Eraser size={20} />
-                </button>
-                <button
-                  onClick={toggleInputMode}
-                  className={`mobile-tool-button ${inputMode === 'all' ? 'active' : ''}`}
-                  aria-label={inputMode === 'stylus-only' ? 'Stylus mode (pen only)' : 'All inputs'}
-                  title={inputMode === 'stylus-only' ? 'Stylus mode (pen only)' : 'All inputs'}
-                >
-                  <Pointer size={20} />
-                </button>
-                <button
-                  onClick={handleUndo}
-                  className="mobile-tool-button"
-                  disabled={undoStack.current.length === 0}
-                  aria-label="Undo"
-                >
-                  <Undo size={20} />
-                </button>
-                <button
-                  onClick={handleRedo}
-                  className="mobile-tool-button"
-                  disabled={redoStack.current.length === 0}
-                  aria-label="Redo"
-                >
-                  <Redo size={20} />
-                </button>
-                <button
-                  onClick={handleClear}
-                  className="mobile-tool-button danger"
-                  aria-label="Clear"
-                >
-                  <Trash2 size={20} />
-                </button>
-              </div>
-            </div>
-          ) : (
-            /* Desktop Sidebar - Vertical layout */
-            <div className="student-sidebar">
-            {/* Colors */}
-            <div className="sidebar-section">
-              <h3 className="sidebar-label">COLORS</h3>
-              <div className="color-buttons">
-                <button
-                  onClick={() => setColor('black')}
-                  className={`color-button ${color === 'black' ? 'active' : ''}`}
-                  style={{ background: 'black' }}
-                  aria-label="Black"
-                />
-                <button
-                  onClick={() => setColor('#0066FF')}
-                  className={`color-button ${color === '#0066FF' ? 'active' : ''}`}
-                  style={{ background: '#0066FF' }}
-                  aria-label="Blue"
-                />
-                <button
-                  onClick={() => setColor('#00AA00')}
-                  className={`color-button ${color === '#00AA00' ? 'active' : ''}`}
-                  style={{ background: '#00AA00' }}
-                  aria-label="Green"
-                />
-              </div>
-            </div>
-
-            {/* Tools */}
-            <div className="sidebar-section">
-              <h3 className="sidebar-label">TOOLS</h3>
-              <div className="tool-buttons tool-icon-buttons">
-                <button
-                  onClick={() => setTool('pen')}
-                  className={`tool-icon-button ${tool === 'pen' ? 'active' : ''}`}
-                  title="Pen"
-                >
-                  <i className="pi pi-pencil tool-icon"></i>
-                  <span className="tool-label">Pen</span>
-                </button>
-                <button
-                  onClick={() => setTool('eraser')}
-                  className={`tool-icon-button ${tool === 'eraser' ? 'active' : ''}`}
-                  title="Eraser"
-                >
-                  <i className="pi pi-eraser tool-icon"></i>
-                  <span className="tool-label">Eraser</span>
-                </button>
-              </div>
-            </div>
-
-            {/* Brush Size */}
-            <div className="sidebar-section">
-              <h3 className="sidebar-label">BRUSH SIZE</h3>
-              <div className="brush-size-control">
-                <div className="brush-slider-container">
-                  <input
-                    type="range"
-                    min="1"
-                    max="10"
-                    value={brushSize}
-                    onChange={(e) => setBrushSize(parseInt(e.target.value))}
-                    className="brush-slider"
-                  />
-                  <span className="brush-value">{brushSize}</span>
-                </div>
-              </div>
-            </div>
-          {/* Input Mode */}
-          <div className="sidebar-section">
-            <h3 className="sidebar-label">INPUT MODE</h3>
-            <button
-              className={`input-mode-toggle ${inputMode === 'all' ? 'all-inputs' : ''}`}
-              onClick={toggleInputMode}
-            >
-              {inputMode === 'stylus-only' ? 'Stylus mode (pen only)' : 'All inputs'}
-            </button>
-          </div>
-
-          {/* History */}
-          <div className="sidebar-section">
-            <h3 className="sidebar-label">HISTORY</h3>
-            <div className="history-buttons">
-              <button
-                onClick={handleUndo}
-                className="history-button"
-                disabled={undoStack.current.length === 0}
-              >
-                Undo
-              </button>
-              <button
-                onClick={handleRedo}
-                className="history-button"
-                disabled={redoStack.current.length === 0}
-              >
-                Redo
-              </button>
-              <button onClick={handleClear} className="history-button danger">
-                Clear
-              </button>
-            </div>
-          </div>
-          </div>
-          )}
-
-          {/* Canvas */}
-          <div className="student-canvas-panel" ref={canvasWrapperRef}>
-            <div className="student-canvas-frame">
-              {isLoadingData && (
-                <div className="canvas-loading-overlay">
-                  <div className="loading-spinner"></div>
-                  <p>Loading your work...</p>
-                </div>
-              )}
-              <div
-                className="student-canvas-surface"
-                style={{ width: `${canvasSize.width}px`, height: `${canvasSize.height}px` }}
-              >
-                <Stage
-                  ref={stageRef}
-                  width={canvasSize.width}
-                  height={canvasSize.height}
-                  onPointerDown={handlePointerDown}
-                  onPointerMove={handlePointerMove}
-                  onPointerUp={handlePointerUp}
-                  onPointerLeave={handlePointerUp}
-                  onTouchStart={(e) => { e.evt?.preventDefault?.(); }}
-                  onTouchMove={(e) => { e.evt?.preventDefault?.(); }}
-                  onTouchEnd={(e) => { e.evt?.preventDefault?.(); }}
-                  className="canvas-stage"
-                  style={{ touchAction: 'none' }}
-                  perfectDrawEnabled={false}
-                  >
-                    {/* Shared image layer (background) */}
-                    <Layer listening={false}>
-                      <SharedImageLayer
-                        sharedImage={sharedImage}
-                        canvasWidth={canvasSize.width}
-                        canvasHeight={canvasSize.height}
-                      />
-                    </Layer>
-
-                    {/* Student layer (editable) */}
-                    <Layer>
-                      {studentLines.map((line, i) => (
-                        <Line
-                        key={`student-${i}`}
-                        points={projectPointsForDisplay(line.points)}
-                        stroke={line.color}
-                        strokeWidth={projectStrokeWidth(line)}
-                        tension={0.5}
-                        lineCap="round"
-                        lineJoin="round"
-                      />
-                    ))}
-                  </Layer>
-
-                  {/* Teacher layer (read-only overlay) */}
-                  <Layer listening={false}>
-                    {teacherLines.map((line, i) => (
-                      <Line
-                        key={`teacher-${i}`}
-                        points={projectPointsForDisplay(line.points)}
-                        stroke={line.color}
-                        strokeWidth={projectStrokeWidth(line)}
-                        tension={0.5}
-                        lineCap="round"
-                        lineJoin="round"
-                      />
-                    ))}
-                  </Layer>
-                </Stage>
-              </div>
-            </div>
-          </div>
+          <StudentCanvas
+            canvasWrapperRef={canvasWrapperRef}
+            canvasSize={canvasSize}
+            stageRef={stageRef}
+            isLoadingData={isLoadingData}
+            sharedImage={sharedImage}
+            studentLines={studentLines}
+            teacherLines={teacherLines}
+            projectPointsForDisplay={projectPointsForDisplay}
+            projectStrokeWidth={projectStrokeWidth}
+            handlePointerDown={handlePointerDown}
+            handlePointerMove={handlePointerMove}
+            handlePointerUp={handlePointerUp}
+          />
         </div>
       </div>
     </div>
