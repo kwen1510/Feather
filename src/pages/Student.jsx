@@ -15,6 +15,8 @@ import {
   validateSession,
   replaceAllStrokes as replaceAllStrokesInIndexedDB
 } from '../utils/indexedDB';
+import { useToast, createToastHelpers } from '../hooks/useToast';
+import ToastContainer from '../components/ToastContainer';
 import './StudentNew.css';
 
 // Generate unique stroke ID
@@ -70,6 +72,10 @@ function Student() {
   const [isMobile, setIsMobile] = useState(isMobileDevice());
   const visibilityListenerAttached = useRef(false);
   const [isLoadingData, setIsLoadingData] = useState(false); // Loading state during page refresh
+
+  // Toast notifications for user feedback
+  const { toasts, showToast, hideToast } = useToast();
+  const toast = createToastHelpers(showToast);
 
   // Redirect to login if missing name or room - DO THIS FIRST before any initialization
   useEffect(() => {
@@ -234,7 +240,7 @@ function Student() {
   // Publishing now happens only when stroke completes (in handlePointerUp)
   // This reduces messages from ~30 per stroke to 1 per stroke
 
-  // Redis auto-save removed - now using IndexedDB + Ably recovery only
+  // Using IndexedDB for local persistence + Ably for real-time sync
 
   // Cleanup animation frame on unmount
   useEffect(() => {
@@ -352,8 +358,14 @@ function Student() {
     };
   }, [roomId, clientId, studentName, navigate]);
 
-  // Initialize Ably connection - wait for studentId to be ready
+  // Initialize Ably connection - wait for studentId AND valid session
   useEffect(() => {
+    // Don't connect to Ably if session validation hasn't completed or failed
+    if (sessionStatus === 'loading' || sessionStatus === 'no-session' || sessionStatus === 'ended') {
+      console.log('⏳ Waiting for valid session before connecting to Ably. Status:', sessionStatus);
+      return;
+    }
+
     if (!roomId || !studentName || !clientId || !studentId) {
       return;
     }
@@ -607,7 +619,7 @@ function Student() {
           });
         }, 500);
 
-        // Load strokes ONLY on page refresh (IndexedDB for own, Redis for teacher annotations)
+        // Load strokes ONLY on page refresh using IndexedDB
         // Use sessionStorage flag to reliably detect refresh
         const hasLoadedBefore = sessionStorage.getItem('feather_page_loaded');
         const navEntry = performance.getEntriesByType('navigation')[0];
@@ -694,6 +706,7 @@ function Student() {
               }
             } catch (error) {
               console.error('Error loading strokes on refresh:', error);
+              toast.error('Failed to load saved work. Starting fresh.');
               setIsLoadingData(false); // Clear loading state on error
             }
           }, 700); // Slightly after requesting current state
@@ -740,7 +753,7 @@ function Student() {
         }
       }
     };
-  }, [clientId, roomId, studentName, navigate, studentId]); // Removed sessionId and currentQuestionId to prevent reconnects
+  }, [clientId, roomId, studentName, navigate, studentId, sessionStatus]); // Added sessionStatus to gate connection on valid session
 
   // Track tab visibility and notify teacher (publish to individual channel)
   useEffect(() => {
@@ -995,6 +1008,7 @@ function Student() {
           }
         } catch (error) {
           console.error('❌ Error saving stroke to IndexedDB:', error);
+          toast.error('Failed to save drawing. Your work may be lost on refresh.', 5000);
         }
       }, 150);
     }
@@ -1022,6 +1036,7 @@ function Student() {
           }
         } catch (error) {
           console.error('❌ Error syncing eraser changes to IndexedDB:', error);
+          toast.error('Failed to save eraser changes. Your work may be lost on refresh.', 5000);
         }
       }, 150);
     }
@@ -1055,6 +1070,7 @@ function Student() {
         }
       } catch (error) {
         console.error('❌ Error syncing undo to IndexedDB:', error);
+        toast.error('Failed to save undo action. Your work may be lost on refresh.', 5000);
       }
     }
   };
@@ -1085,6 +1101,7 @@ function Student() {
         }
       } catch (error) {
         console.error('❌ Error syncing redo to IndexedDB:', error);
+        toast.error('Failed to save redo action. Your work may be lost on refresh.', 5000);
       }
     }
   };
@@ -1211,6 +1228,9 @@ function Student() {
           />
         </div>
       </div>
+
+      {/* Toast notifications */}
+      <ToastContainer toasts={toasts} onClose={hideToast} />
     </div>
   );
 }
